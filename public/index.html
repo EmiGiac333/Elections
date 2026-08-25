@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Simulatore Elezioni USA</title>
+    <meta
+      name="description"
+      content="Simulatore delle elezioni presidenziali americane: scegli due ticket di personaggi famosi e ottieni l'analisi stato per stato."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗳️</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <div>
+          <h1>Simulatore Elezioni USA</h1>
+          <p class="tagline">
+            Metti in campo due ticket qualsiasi, l'analisi stato per stato e la simulazione del
+            Collegio Elettorale fanno il resto.
+          </p>
+        </div>
+        <div class="mode-badge" id="mode-badge" hidden></div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <form id="form" class="panel setup" novalidate>
+        <div class="tickets">
+          <fieldset class="ticket ticket-a">
+            <legend><span class="dot dot-a" aria-hidden="true"></span> Ticket A</legend>
+            <label>
+              Candidato/a alla presidenza
+              <input name="a-president" required maxlength="80" placeholder="es. Taylor Swift" />
+            </label>
+            <label>
+              Candidato/a alla vicepresidenza
+              <input name="a-vice" required maxlength="80" placeholder="es. Tom Hanks" />
+            </label>
+            <label>
+              Etichetta politica <span class="hint">facoltativa</span>
+              <input name="a-party" maxlength="60" placeholder="es. Democratici, indipendente…" />
+            </label>
+          </fieldset>
+
+          <div class="versus" aria-hidden="true">contro</div>
+
+          <fieldset class="ticket ticket-b">
+            <legend><span class="dot dot-b" aria-hidden="true"></span> Ticket B</legend>
+            <label>
+              Candidato/a alla presidenza
+              <input name="b-president" required maxlength="80" placeholder="es. Elon Musk" />
+            </label>
+            <label>
+              Candidato/a alla vicepresidenza
+              <input name="b-vice" required maxlength="80" placeholder="es. Dwayne Johnson" />
+            </label>
+            <label>
+              Etichetta politica <span class="hint">facoltativa</span>
+              <input name="b-party" maxlength="60" placeholder="es. Repubblicani, indipendente…" />
+            </label>
+          </fieldset>
+        </div>
+
+        <div class="presets">
+          <span class="presets-label">Sfide pronte:</span>
+          <div id="presets" class="preset-chips"></div>
+        </div>
+
+        <details class="advanced">
+          <summary>Contesto e parametri della simulazione</summary>
+          <div class="advanced-grid">
+            <label class="span-2">
+              Contesto dello scenario <span class="hint">facoltativo</span>
+              <textarea
+                name="scenario"
+                rows="3"
+                maxlength="1200"
+                placeholder="es. recessione in corso, il tema dominante è l'intelligenza artificiale, forte candidatura di un terzo polo…"
+              ></textarea>
+            </label>
+            <label>
+              Anno
+              <input name="year" type="number" min="2024" max="2100" step="4" value="2028" />
+            </label>
+            <label>
+              Elezioni simulate
+              <input name="iterations" type="number" min="1000" max="100000" step="1000" value="20000" />
+            </label>
+            <label>
+              Seme casuale <span class="hint">vuoto = dai nomi</span>
+              <input name="seed" type="number" min="0" placeholder="automatico" />
+            </label>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button type="submit" class="primary" id="submit">Simula l'elezione</button>
+          <button type="button" class="ghost" id="random">Ticket a caso</button>
+          <p class="error" id="error" role="alert" hidden></p>
+        </div>
+      </form>
+
+      <section id="loading" class="panel loading" hidden aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <p class="loading-step" id="loading-step">Preparazione della campagna…</p>
+          <p class="loading-meta">
+            <span id="loading-elapsed">0 s</span> — l'analisi dei 56 collegi richiede in genere
+            da uno a tre minuti.
+          </p>
+        </div>
+      </section>
+
+      <section id="results" hidden>
+        <!-- Esito -->
+        <section class="panel result-hero">
+          <div class="hero-head">
+            <h2>Chi vincerebbe</h2>
+            <p class="hero-sub" id="hero-sub"></p>
+          </div>
+
+          <div class="odds">
+            <div class="odds-side side-a">
+              <p class="odds-name" id="odds-name-a"></p>
+              <p class="odds-value" id="odds-a"></p>
+              <p class="odds-ev" id="odds-ev-a"></p>
+            </div>
+            <div class="odds-side side-b">
+              <p class="odds-name" id="odds-name-b"></p>
+              <p class="odds-value" id="odds-b"></p>
+              <p class="odds-ev" id="odds-ev-b"></p>
+            </div>
+          </div>
+
+          <div class="prob-bar" id="prob-bar" role="img" aria-label="Probabilità di vittoria">
+            <div class="prob-seg seg-a" id="prob-seg-a"></div>
+            <div class="prob-seg seg-tie" id="prob-seg-tie"></div>
+            <div class="prob-seg seg-b" id="prob-seg-b"></div>
+          </div>
+
+          <div class="ev-bar-wrap">
+            <p class="chart-label">Grandi elettori attesi su 538</p>
+            <div class="ev-bar" id="ev-bar" role="img">
+              <div class="ev-seg ev-a" id="ev-seg-a"></div>
+              <div class="ev-seg ev-b" id="ev-seg-b"></div>
+              <div class="ev-threshold"><span>270</span></div>
+            </div>
+          </div>
+
+          <ul class="facts" id="facts"></ul>
+        </section>
+
+        <!-- Mappa -->
+        <section class="panel">
+          <div class="section-head">
+            <h2>La mappa</h2>
+            <p class="section-sub">
+              Ogni tessera è uno stato, la dimensione del testo non conta: contano i grandi
+              elettori indicati. Passa sopra una tessera per la reazione dello stato.
+            </p>
+          </div>
+
+          <div class="map-legend" id="map-legend"></div>
+          <div class="map-scroll">
+            <div class="tilemap" id="tilemap"></div>
+          </div>
+          <div class="districts">
+            <p class="chart-label">Collegi distrettuali (Maine e Nebraska assegnano per distretto)</p>
+            <div class="district-row" id="districts"></div>
+          </div>
+          <div class="map-tooltip" id="map-tooltip" hidden></div>
+        </section>
+
+        <!-- Distribuzione -->
+        <section class="panel">
+          <div class="section-head">
+            <h2>Distribuzione degli esiti</h2>
+            <p class="section-sub" id="dist-sub"></p>
+          </div>
+          <div class="chart-scroll">
+            <svg id="histogram" class="histogram" role="img" aria-labelledby="hist-title"></svg>
+          </div>
+          <p id="hist-title" class="sr-only"></p>
+          <div class="two-col">
+            <div>
+              <h3>Stati decisivi</h3>
+              <p class="section-sub">Quanto spesso uno stato è quello che porta oltre quota 270.</p>
+              <ul class="tipping" id="tipping"></ul>
+            </div>
+            <div>
+              <h3>Le sfide più strette</h3>
+              <p class="section-sub">Gli stati dove il margine atteso è più sottile.</p>
+              <ul class="tipping" id="closest"></ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- Analisi -->
+        <section class="panel" id="analysis-panel">
+          <div class="section-head">
+            <h2>I due ticket</h2>
+          </div>
+          <div class="two-col" id="ticket-cards"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>Come andrebbe la campagna</h2>
+          </div>
+          <div class="story" id="story"></div>
+          <div class="headlines">
+            <h3>Il giorno dopo</h3>
+            <ul id="headlines"></ul>
+          </div>
+          <div class="wildcards">
+            <h3>Incognite</h3>
+            <div id="wildcards"></div>
+          </div>
+        </section>
+
+        <!-- Tabella -->
+        <section class="panel">
+          <div class="section-head">
+            <h2>Tutti i collegi</h2>
+            <p class="section-sub">
+              Clicca sull'intestazione per ordinare. Margine positivo = vantaggio del ticket A.
+            </p>
+          </div>
+          <div class="table-scroll">
+            <table class="states-table" id="states-table">
+              <thead>
+                <tr>
+                  <th data-sort="name" scope="col">Collegio</th>
+                  <th data-sort="ev" scope="col">GE</th>
+                  <th data-sort="expectedMargin" scope="col">Margine atteso</th>
+                  <th data-sort="probA" scope="col">Prob. ticket A</th>
+                  <th data-sort="lean" scope="col">Base 2024</th>
+                  <th scope="col">Reazione dello stato</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel disclaimer" id="disclaimer"></section>
+      </section>
+    </main>
+
+    <footer class="wrap site-footer">
+      <p>
+        Simulazione dichiaratamente immaginaria: nessuno dei personaggi citati è candidato a
+        nulla e i numeri non sono una previsione. La base storica di ogni stato è il risultato
+        presidenziale 2024, la ripartizione dei grandi elettori è quella 2024-2030.
+      </p>
+    </footer>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
