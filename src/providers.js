@@ -107,21 +107,21 @@ export function resolveProvider(env = process.env) {
       const noti = Object.keys(PROVIDERS).join(', ');
       throw new Error(`AI_PROVIDER="${requested}" non riconosciuto. Valori validi: ${noti}.`);
     }
-    return describe(provider, env, 'scelto con AI_PROVIDER');
+    return describe(provider, env, 'scelto con AI_PROVIDER', false);
   }
 
   for (const id of AUTO_ORDER) {
     const provider = PROVIDERS[id];
     if (provider.apiKeyEnv && env[provider.apiKeyEnv]) {
-      return describe(provider, env, `rilevato da ${provider.apiKeyEnv}`);
+      return describe(provider, env, `rilevato da ${provider.apiKeyEnv}`, false);
     }
   }
 
   // Nessuna chiave: si prova comunque il modello locale, che non ne richiede.
-  return describe(PROVIDERS.ollama, env, 'nessuna chiave configurata, provo il modello locale');
+  return describe(PROVIDERS.ollama, env, 'nessuna chiave configurata, provo il modello locale', true);
 }
 
-function describe(provider, env, reason) {
+function describe(provider, env, reason, autoFallback) {
   return {
     provider,
     model: (env.AI_MODEL ?? '').trim() || provider.defaultModel,
@@ -129,6 +129,9 @@ function describe(provider, env, reason) {
     apiKey: provider.apiKeyEnv ? (env[provider.apiKeyEnv] ?? null) : null,
     chunk: clampChunk(env.AI_STATE_CHUNK, provider.chunk),
     reason,
+    // Vero quando nessuno ha scelto questo provider: ci siamo arrivati per
+    // esclusione. Serve a dare un messaggio d'errore sensato se non risponde.
+    autoFallback,
   };
 }
 

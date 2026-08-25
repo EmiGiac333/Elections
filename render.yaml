@@ -1,0 +1,35 @@
+# Configurazione per il deploy su Render (https://render.com).
+#
+# Come si usa:
+#   1. su Render: New > Blueprint, collega questo repository
+#   2. Render legge questo file e crea il servizio da solo
+#   3. nella scheda "Environment" del servizio, imposta la chiave gratuita del
+#      provider che vuoi usare (GROQ_API_KEY, GEMINI_API_KEY o OPENROUTER_API_KEY)
+#
+# In alternativa, senza Blueprint: New > Web Service, runtime Node,
+# build "npm install", avvio "npm start". Il resto è già a posto.
+
+services:
+  - type: web
+    name: simulatore-elezioni-usa
+    runtime: node
+    plan: free
+    # Il progetto non ha dipendenze obbligatorie: npm install serve solo a
+    # installare l'SDK Anthropic se qualcuno lo aggiunge a package.json.
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      # Il provider viene rilevato dalla chiave presente. Per forzarlo:
+      #   AI_PROVIDER = groq | gemini | openrouter | demo
+      # Sul piano gratuito di Render non c'è modo di far girare Ollama:
+      # serve una delle chiavi gratuite qui sotto.
+      - key: GEMINI_API_KEY
+        sync: false # da inserire a mano nella dashboard, non finisce nel repository
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false

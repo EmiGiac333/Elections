@@ -65,6 +65,35 @@ Il simulatore parte comunque, e se l'analisi non è disponibile propone la **mod
 dimostrativa**: i margini vengono da una formula deterministica applicata ai nomi, servono solo a
 provare l'interfaccia e ogni schermata lo dichiara. Non è un'analisi.
 
+## Pubblicare online (Render, gratuito)
+
+Il progetto è pronto per il piano gratuito di [Render](https://render.com): c'è già
+`render.yaml`, il server legge la porta da `PORT` e risponde al controllo di salute su
+`/api/health`.
+
+1. Su Render: **New → Blueprint**, collega questo repository. Render legge `render.yaml` e crea
+   il servizio da solo (in alternativa: **New → Web Service**, runtime Node, build `npm install`,
+   avvio `npm start`).
+2. Nella scheda **Environment** del servizio, incolla la chiave gratuita del provider che vuoi
+   usare: `GEMINI_API_KEY`, `GROQ_API_KEY` oppure `OPENROUTER_API_KEY`. Le chiavi restano nella
+   dashboard di Render, non nel repository.
+3. Il sito è online. Ogni push sul ramo collegato lo riaggiorna.
+
+Tre cose da sapere prima di pubblicarlo:
+
+- **Ollama non è un'opzione in cloud.** Sul piano gratuito non c'è modo di far girare un modello
+  locale: serve una delle chiavi gratuite. Se non ne imposti nessuna, il simulatore lo dice
+  esplicitamente e propone comunque la modalità dimostrativa.
+- **La tua chiave la usano tutti i visitatori.** Chi apre il sito consuma la *tua* quota gratuita.
+  Se l'indirizzo è pubblico, tienilo presente: le quote gratuite hanno un tetto, ma si esauriscono.
+- **Il servizio si sospende dopo 15 minuti di inattività.** La prima visita dopo una pausa aspetta
+  qualche decina di secondi il riavvio, poi va normale.
+
+Le stesse istruzioni valgono, con nomi diversi, per gli altri servizi che eseguono un processo
+Node persistente (Koyeb, Hugging Face Spaces con SDK Docker). Non funzionano invece i servizi
+*serverless* con limite di durata sulla singola richiesta — Vercel, Netlify, Cloudflare Workers —
+perché qui una richiesta resta aperta finché il modello lavora, anche per minuti.
+
 ## Variabili d'ambiente
 
 | Variabile | Default | Significato |
@@ -74,7 +103,7 @@ provare l'interfaccia e ogni schermata lo dichiara. Non è un'analisi.
 | `AI_STATE_CHUNK` | dipende dal provider | Quanti collegi chiedere per richiesta |
 | `AI_TIMEOUT_MS` | `180000` | Attesa massima per una risposta del modello |
 | `OLLAMA_URL` | `http://localhost:11434` | Utile se Ollama gira su un'altra macchina |
-| `PORT` | `3000` | Porta del server |
+| `PORT` | `3000` | Porta del server (impostata in automatico dai servizi di hosting) |
 
 Le stesse variabili possono stare in un file `.env` accanto al progetto (vedi `.env.example`).
 
@@ -125,6 +154,7 @@ identico. La parte variabile è solo la risposta del modello.
 
 ```
 server.js                 server HTTP (solo moduli Node) + endpoint /api/simulate
+render.yaml               configurazione per il deploy gratuito su Render
 src/providers.js          i provider disponibili e la scelta di quello attivo
 src/llm.js                dialetti Ollama, OpenAI-compatibile e Anthropic + parser JSON tollerante
 src/schema.js             schemi JSON del profilo e dei blocchi di collegi
@@ -133,7 +163,7 @@ src/simulation.js         motore Monte Carlo del Collegio Elettorale
 src/states.js             i 56 collegi: grandi elettori, base 2024, regione, elasticità, mappa
 src/offline.js            modello euristico della modalità dimostrativa
 public/                   interfaccia (HTML/CSS/JS, nessun framework)
-test/                     test del motore, dei provider, degli schemi e della validazione
+test/                     test del motore, dei provider, degli schemi e degli endpoint HTTP
 ```
 
 ## API
@@ -160,16 +190,22 @@ Con `"mode": "demo"` si ottiene la modalità dimostrativa senza interrogare ness
 `GET /api/meta` restituisce i 56 collegi, il provider attivo e il catalogo dei provider
 disponibili con le istruzioni per attivarli.
 
+`GET /api/health` risponde `{"ok":true}`: è il controllo di salute usato dai servizi di hosting.
+
+Fra una riga e l'altra il flusso manda un `{"type":"ping"}` ogni 15 secondi, perché i proxy dei
+servizi di hosting chiudono le connessioni rimaste mute troppo a lungo.
+
 ## Test
 
 ```bash
 npm test
 ```
 
-26 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
+31 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
 riproducibilità della simulazione, validazione degli input, scelta del provider, forma degli
-schemi e parser JSON tollerante (recinti markdown, preamboli, blocchi di ragionamento, risposte
-troncate).
+schemi, parser JSON tollerante (recinti markdown, preamboli, blocchi di ragionamento, risposte
+troncate) e gli endpoint HTTP, compresi il controllo di salute e una simulazione completa in
+modalità dimostrativa.
 
 ## Avvertenza
 

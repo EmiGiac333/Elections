@@ -32,6 +32,10 @@ const MIME = {
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (req.method === 'GET' && req.url === '/api/health') {
+      return sendJson(res, 200, { ok: true, uptime: Math.round(process.uptime()) });
+    }
+
     if (req.method === 'GET' && req.url === '/api/meta') {
       return sendJson(res, 200, {
         units: UNITS,
@@ -85,6 +89,13 @@ async function handleSimulate(req, res) {
   });
   const send = (line) => res.write(`${JSON.stringify(line)}\n`);
 
+  // I proxy dei servizi di hosting chiudono le connessioni che restano mute
+  // troppo a lungo, e fra un blocco di collegi e l'altro il modello può
+  // impiegarci minuti: una riga di battito tiene viva la risposta.
+  const heartbeat = setInterval(() => send({ type: 'ping', at: Date.now() }), 15000);
+  heartbeat.unref?.();
+  res.on('close', () => clearInterval(heartbeat));
+
   const startedAt = Date.now();
   const wantsDemo = payload?.mode === 'demo' || process.env.AI_PROVIDER === 'demo';
 
@@ -109,6 +120,7 @@ async function handleSimulate(req, res) {
       mode = 'ai';
     } catch (error) {
       console.error('Analisi con il modello fallita:', error);
+      clearInterval(heartbeat);
       send({ type: 'error', error: error.message, canFallback: true });
       return res.end();
     }
@@ -151,6 +163,7 @@ async function handleSimulate(req, res) {
     simulation,
     meta: { totalEv: TOTAL_EV, majority: MAJORITY },
   });
+  clearInterval(heartbeat);
   res.end();
 }
 
@@ -319,6 +332,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       console.log(`Attenzione: manca ${active.apiKeyEnv}. ${active.setup}`);
     }
   });
+
+  // I servizi di hosting mandano SIGTERM prima di sostituire un'istanza:
+  // chiudere con ordine evita risposte troncate a metà.
+  for (const segnale of ['SIGTERM', 'SIGINT']) {
+    process.on(segnale, () => {
+      console.log(`Ricevuto ${segnale}, chiudo il server.`);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 10000).unref();
+    });
+  }
 }
 
 export { server, validateInput, normalizeEstimates };

@@ -120,6 +120,14 @@ async function ensureReachable(target) {
 
   const installed = await ollamaModels(target.baseUrl);
   if (installed === null) {
+    // Se siamo finiti su Ollama solo per esclusione, il problema vero è che non
+    // è configurato nessun modello: su un server in cloud è il caso normale.
+    if (target.autoFallback) {
+      throw new Error(
+        'Nessun modello configurato. Imposta una chiave gratuita fra GROQ_API_KEY, GEMINI_API_KEY ' +
+          'o OPENROUTER_API_KEY, oppure avvia Ollama in locale (https://ollama.com).',
+      );
+    }
     throw new Error(
       `Ollama non risponde su ${target.baseUrl}. Avvialo (comando: ollama serve) oppure scegli un altro provider con AI_PROVIDER. ${provider.setup}`,
     );
