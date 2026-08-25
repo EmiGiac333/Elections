@@ -5,8 +5,8 @@ scelte da te**. Inserisci due ticket (presidente + vicepresidente), un modello l
 come reagirebbe ciascuno dei 56 collegi del Collegio Elettorale, e una simulazione Monte Carlo
 trasforma quelle stime in probabilità di vittoria.
 
-**Funziona con modelli gratuiti**, compreso un modello che gira sul tuo computer senza account,
-senza chiave e senza costi. Nessuna dipendenza da installare: serve solo Node 20 o successivo.
+**Funziona con modelli gratuiti**, compreso un modello che gira dentro il browser senza account,
+senza chiave e senza nessuna API. Nessuna dipendenza da installare: serve solo Node 20 o successivo.
 
 ## Avvio rapido
 
@@ -15,9 +15,29 @@ npm start          # nessun npm install necessario: zero dipendenze
 # apri http://localhost:3000
 ```
 
-Prima però serve un modello. Scegline uno fra questi, sono tutti utilizzabili gratuitamente.
+Poi scegli in pagina chi produce l'analisi. Le opzioni sono tutte gratuite.
 
-### Opzione 1 — Modello locale con Ollama (nessun account, nessun limite)
+### Opzione 1 — Modello nel browser (nessuna API, niente da installare)
+
+La più semplice: scegli il modello dal menù della pagina e premi il pulsante. Il modello si
+scarica una volta sola nella cache del browser e gira sulla scheda grafica tramite WebGPU. Non
+esce nessuna richiesta verso nessun servizio, non serve nessuna chiave e non c'è niente da
+installare oltre al progetto stesso.
+
+Serve un browser con WebGPU: Chrome o Edge su computer, oppure Safari 18 e successivi. Se manca,
+la pagina lo dice e disattiva l'opzione invece di fallire a metà simulazione.
+
+Il primo scaricamento va da poche centinaia di MB a un paio di GB a seconda del modello scelto;
+dopo, il modello resta nella cache e le simulazioni successive partono subito. La libreria arriva
+da un CDN: se vuoi una pagina che non dipenda da nessuna rete esterna per il codice, `npm run
+vendor:webllm` ne salva una copia in `public/vendor/` e da quel momento viene usata quella.
+
+I modelli utilizzabili nel browser sono piccoli (1-3 miliardi di parametri): l'analisi è più
+grossolana di quella di un modello grande. La struttura a blocchi è fatta apposta per reggerli —
+chiede sei collegi per volta con decodifica vincolata dalla grammatica dello schema, così il
+modello non può nemmeno rispondere in un formato sbagliato.
+
+### Opzione 2 — Modello locale con Ollama (più potente, richiede un'installazione)
 
 È la scelta consigliata se hai un computer decente: gira tutto in locale, non esce nessun dato e
 non c'è nessun limite di utilizzo.
@@ -35,7 +55,7 @@ Il simulatore rileva Ollama da solo. Con un modello più piccolo (`ollama pull q
 veloce ma le analisi sono più povere; con uno più grande (`llama3.1:70b`) succede il contrario.
 Per sceglierlo: `AI_MODEL=qwen2.5:7b npm start`.
 
-### Opzione 2 — Piano gratuito nel cloud (nessun hardware richiesto)
+### Opzione 3 — Piano gratuito nel cloud (nessun hardware richiesto)
 
 Se il computer non regge un modello locale, questi servizi hanno un piano gratuito. Basta una
 chiave, che si ottiene in un minuto.
@@ -50,7 +70,7 @@ Il provider viene rilevato dalla chiave presente; per forzarlo, `AI_PROVIDER=gro
 predefinito non fosse più disponibile sul servizio (i cataloghi cambiano spesso), il simulatore
 riporta l'errore del servizio e basta indicarne un altro con `AI_MODEL`.
 
-### Opzione 3 — Anthropic (a pagamento, facoltativa)
+### Opzione 4 — Anthropic (a pagamento, facoltativa)
 
 Resta disponibile per chi ha già una chiave, ma richiede un pacchetto in più:
 
@@ -63,7 +83,8 @@ AI_PROVIDER=anthropic ANTHROPIC_API_KEY=... npm start
 
 Il simulatore parte comunque, e se l'analisi non è disponibile propone la **modalità
 dimostrativa**: i margini vengono da una formula deterministica applicata ai nomi, servono solo a
-provare l'interfaccia e ogni schermata lo dichiara. Non è un'analisi.
+provare l'interfaccia e ogni schermata lo dichiara. Non è un'analisi. Gira interamente nel
+browser, quindi funziona anche senza nessun server dietro.
 
 ## Pubblicare online (Render, gratuito)
 
@@ -92,7 +113,16 @@ Tre cose da sapere prima di pubblicarlo:
 Le stesse istruzioni valgono, con nomi diversi, per gli altri servizi che eseguono un processo
 Node persistente (Koyeb, Hugging Face Spaces con SDK Docker). Non funzionano invece i servizi
 *serverless* con limite di durata sulla singola richiesta — Vercel, Netlify, Cloudflare Workers —
-perché qui una richiesta resta aperta finché il modello lavora, anche per minuti.
+perché una richiesta al modello remoto resta aperta finché il modello lavora, anche per minuti.
+
+### Anche solo file statici (GitHub Pages)
+
+Da quando il modello può girare nel browser, la pagina non ha più bisogno di un server: il modello
+nel browser e la modalità dimostrativa funzionano anche pubblicando il repository come sito
+statico. Su GitHub Pages, con la pubblicazione dalla radice del ramo, l'indirizzo è
+`https://<utente>.github.io/<repo>/public/`. Quello che non funziona lì sono le opzioni che
+passano dal server (Ollama e le chiavi cloud): la pagina se ne accorge da sola e le disattiva,
+perché `api/meta` non risponde.
 
 ## Variabili d'ambiente
 
@@ -118,6 +148,9 @@ nomi dei candidati
         ▼
  2. collegi  ──►  N richieste a blocchi: margine, incertezza e reazione
         │         di ogni stato, col profilo come contesto
+        │
+        │   Le due fasi girano nello stesso modo ovunque sia il modello: nel
+        │   browser via WebGPU, in locale con Ollama, o su un servizio remoto.
         ▼
 src/simulation.js ──► 20.000 elezioni simulate
         │              margine = stima + elasticità·shock_nazionale
@@ -156,14 +189,19 @@ identico. La parte variabile è solo la risposta del modello.
 server.js                 server HTTP (solo moduli Node) + endpoint /api/simulate
 render.yaml               configurazione per il deploy gratuito su Render
 src/providers.js          i provider disponibili e la scelta di quello attivo
-src/llm.js                dialetti Ollama, OpenAI-compatibile e Anthropic + parser JSON tollerante
+src/llm.js                dialetti WebLLM, Ollama, OpenAI-compatibile e Anthropic
 src/schema.js             schemi JSON del profilo e dei blocchi di collegi
 src/ai.js                 prompt e orchestrazione delle due fasi
 src/simulation.js         motore Monte Carlo del Collegio Elettorale
+src/result.js             assemblaggio del risultato, condiviso fra server e browser
+src/input.js              validazione dei dati del modulo, condivisa fra server e browser
 src/states.js             i 56 collegi: grandi elettori, base 2024, regione, elasticità, mappa
 src/offline.js            modello euristico della modalità dimostrativa
+public/webllm.js          caricamento del modello nel browser e scelta fra quelli disponibili
+public/webllm-worker.js   il modello gira qui, non sul thread della pagina
 public/                   interfaccia (HTML/CSS/JS, nessun framework)
-test/                     test del motore, dei provider, degli schemi e degli endpoint HTTP
+scripts/vendor-webllm.mjs copia locale della libreria, per non dipendere dal CDN
+test/                     test del motore, dei provider, degli schemi, degli endpoint e del browser
 ```
 
 ## API
@@ -201,11 +239,12 @@ servizi di hosting chiudono le connessioni rimaste mute troppo a lungo.
 npm test
 ```
 
-31 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
+38 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
 riproducibilità della simulazione, validazione degli input, scelta del provider, forma degli
 schemi, parser JSON tollerante (recinti markdown, preamboli, blocchi di ragionamento, risposte
-troncate) e gli endpoint HTTP, compresi il controllo di salute e una simulazione completa in
-modalità dimostrativa.
+troncate), gli endpoint HTTP e l'intera catena del modello nel browser con un motore finto —
+compresi il caso in cui un blocco di collegi fallisce e quello in cui il modello avvolge la
+risposta in un recinto markdown.
 
 ## Avvertenza
 

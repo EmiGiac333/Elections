@@ -38,9 +38,11 @@ Vincoli:
  *
  * @param {object} input dati del modulo già validati
  * @param {(fase: {step: number, total: number, label: string}) => void} [onProgress]
+ * @param {object} [providedTarget] provider già risolto: lo passa il browser,
+ *        che sceglie il proprio motore invece di leggerlo dall'ambiente
  */
-export async function analyzeElection(input, onProgress = () => {}) {
-  const target = resolveProvider();
+export async function analyzeElection(input, onProgress = () => {}, providedTarget = null) {
+  const target = providedTarget ?? resolveProvider();
   await ensureReachable(target);
 
   const chunks = chunkCodes(UNITS.map((u) => u.code), target.chunk);
@@ -109,6 +111,10 @@ export async function analyzeElection(input, onProgress = () => {}) {
 /** Verifica in anticipo che il provider sia raggiungibile, con un errore utile. */
 async function ensureReachable(target) {
   const { provider } = target;
+
+  // Il modello del browser è già caricato quando si arriva qui: non c'è niente
+  // da contattare.
+  if (provider.kind === 'webllm') return;
 
   if (provider.apiKeyEnv && !target.apiKey) {
     throw new Error(

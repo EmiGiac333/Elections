@@ -16,6 +16,21 @@
  */
 
 export const PROVIDERS = {
+  webllm: {
+    id: 'webllm',
+    label: 'Modello nel browser',
+    kind: 'webllm',
+    free: true,
+    cost: 'gratuito: gira sul computer di chi apre la pagina',
+    apiKeyEnv: null,
+    // Il modello vero si sceglie a runtime dalla lista della libreria: qui non
+    // se ne fissa nessuno, perché il catalogo cambia a ogni versione.
+    defaultModel: '',
+    browserOnly: true,
+    // Un modello da 1-3 miliardi di parametri regge poche stime per volta.
+    chunk: 6,
+    setup: 'Serve un browser con WebGPU: Chrome o Edge su computer, Safari 18+',
+  },
   ollama: {
     id: 'ollama',
     label: 'Ollama (modello locale)',
@@ -88,7 +103,10 @@ export const PROVIDERS = {
   },
 };
 
-/** Ordine di rilevamento automatico: prima i gratuiti, il locale per ultimo. */
+/**
+ * Ordine di rilevamento automatico: prima i gratuiti, il locale per ultimo.
+ * `webllm` non compare perché non esiste lato server: lo sceglie il browser.
+ */
 const AUTO_ORDER = ['groq', 'gemini', 'openrouter', 'anthropic', 'ollama'];
 
 /**
@@ -98,7 +116,7 @@ const AUTO_ORDER = ['groq', 'gemini', 'openrouter', 'anthropic', 'ollama'];
  * @returns {{provider: object, model: string, baseUrl: string|null,
  *            apiKey: string|null, reason: string}}
  */
-export function resolveProvider(env = process.env) {
+export function resolveProvider(env = globalThis.process?.env ?? {}) {
   const requested = (env.AI_PROVIDER ?? '').trim().toLowerCase();
 
   if (requested) {
@@ -128,6 +146,7 @@ function describe(provider, env, reason, autoFallback) {
     baseUrl: provider.baseUrlEnv ? (env[provider.baseUrlEnv] ?? provider.baseUrl) : (provider.baseUrl ?? null),
     apiKey: provider.apiKeyEnv ? (env[provider.apiKeyEnv] ?? null) : null,
     chunk: clampChunk(env.AI_STATE_CHUNK, provider.chunk),
+    timeoutMs: Number(env.AI_TIMEOUT_MS) > 0 ? Number(env.AI_TIMEOUT_MS) : 180000,
     reason,
     // Vero quando nessuno ha scelto questo provider: ci siamo arrivati per
     // esclusione. Serve a dare un messaggio d'errore sensato se non risponde.
@@ -150,6 +169,7 @@ export function providerCatalog() {
     cost: p.cost,
     apiKeyEnv: p.apiKeyEnv,
     defaultModel: p.defaultModel,
+    browserOnly: Boolean(p.browserOnly),
     setup: p.setup,
   }));
 }

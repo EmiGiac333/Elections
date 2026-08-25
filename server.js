@@ -11,8 +11,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { UNITS, TOTAL_EV, MAJORITY, CORE_BATTLEGROUNDS } from './src/states.js';
-import { runSimulation, hashSeed } from './src/simulation.js';
+import { buildSimulationResult, normalizeEstimates } from './src/result.js';
+import { validateInput } from './src/input.js';
 import { analyzeElection } from './src/ai.js';
+import { ollamaModels } from './src/llm.js';
 import { offlineAnalysis } from './src/offline.js';
 import { resolveProvider, providerCatalog } from './src/providers.js';
 
@@ -42,7 +44,7 @@ const server = http.createServer(async (req, res) => {
         totalEv: TOTAL_EV,
         majority: MAJORITY,
         battlegrounds: CORE_BATTLEGROUNDS,
-        provider: activeProvider(),
+        provider: await activeProvider({ probe: true }),
         catalog: providerCatalog(),
       });
     }
@@ -128,49 +130,47 @@ async function handleSimulate(req, res) {
 
   send({ type: 'progress', step: 0, total: 0, label: 'Simulazione delle elezioni' });
 
-  const estimates = normalizeEstimates(analysis.stati);
-  const nationalMargin = nationalMarginFrom(analysis.nazionale);
-
-  const simulation = runSimulation(estimates, {
-    iterations: input.iterations,
-    seed: input.seed,
-    nationalMargin,
-  });
-
-  const reactions = Object.fromEntries(
-    (analysis.stati ?? []).map((s) => [s.code, s.reazione]).filter(([code]) => code),
-  );
-
-  // Se il modello salta qualche collegio, quel collegio ricade sulla base storica:
-  // lo dichiaro invece di far finta che l'analisi fosse completa.
-  const missing = UNITS.filter((u) => !estimates.some((e) => e.code === u.code)).map((u) => u.code);
-  if (missing.length) {
-    console.warn(`Collegi non stimati dal modello (uso la base storica): ${missing.join(', ')}`);
-  }
-
-  send({
-    type: 'result',
-    mode,
-    model,
-    provider: provider ?? activeProvider(),
-    usage,
-    failures,
-    coverage: { expected: UNITS.length, received: estimates.length, missing },
-    elapsedMs: Date.now() - startedAt,
+  const result = buildSimulationResult({
     input,
     analysis,
-    reactions,
-    simulation,
-    meta: { totalEv: TOTAL_EV, majority: MAJORITY },
+    mode,
+    model,
+    provider: provider ?? (await activeProvider()),
+    usage,
+    failures,
+    elapsedMs: Date.now() - startedAt,
   });
+
+  if (result.coverage.missing.length) {
+    console.warn(
+      `Collegi non stimati dal modello (uso la base storica): ${result.coverage.missing.join(', ')}`,
+    );
+  }
+
+  send(result);
   clearInterval(heartbeat);
   res.end();
 }
 
-/** Descrizione del provider attivo, senza mai esporre le chiavi. */
-function activeProvider() {
+/**
+ * Descrizione del provider attivo, senza mai esporre le chiavi.
+ *
+ * Con `probe` viene anche verificato che il modello risponda davvero: per un
+ * modello locale avere la configurazione giusta non basta, il processo deve
+ * essere acceso. È quello che permette alla pagina di dire "server pronto"
+ * soltanto quando lo è per davvero.
+ */
+async function activeProvider({ probe = false } = {}) {
   try {
     const target = resolveProvider();
+    const needsKey = Boolean(target.provider.apiKeyEnv && !target.apiKey);
+
+    let ready = !needsKey;
+    if (probe && ready && target.provider.kind === 'ollama') {
+      const installed = await ollamaModels(target.baseUrl);
+      ready = Array.isArray(installed) && installed.length > 0;
+    }
+
     return {
       id: target.provider.id,
       label: target.provider.label,
@@ -178,97 +178,39 @@ function activeProvider() {
       cost: target.provider.cost,
       model: target.model,
       reason: target.reason,
-      needsKey: Boolean(target.provider.apiKeyEnv && !target.apiKey),
+      needsKey,
+      ready,
       apiKeyEnv: target.provider.apiKeyEnv,
       setup: target.provider.setup,
     };
   } catch (error) {
-    return { id: null, label: 'nessuno', free: true, error: error.message };
+    return { id: null, label: 'nessuno', free: true, ready: false, error: error.message };
   }
 }
 
-function validateInput(payload) {
-  const ticketA = validateTicket(payload?.ticketA, 'Ticket A');
-  const ticketB = validateTicket(payload?.ticketB, 'Ticket B');
 
-  const sameTicket =
-    ticketA.president.toLowerCase() === ticketB.president.toLowerCase() &&
-    ticketA.vice.toLowerCase() === ticketB.vice.toLowerCase();
-  if (sameTicket) throw new Error('I due ticket devono essere diversi.');
+const SRC_DIR = path.join(ROOT, 'src');
 
-  const year = Number(payload?.year);
-  const iterations = Number(payload?.iterations);
-  const scenario = typeof payload?.scenario === 'string' ? payload.scenario.slice(0, 1200) : '';
-
-  return {
-    ticketA,
-    ticketB,
-    scenario,
-    year: Number.isInteger(year) && year >= 1900 && year <= 2100 ? year : 2028,
-    iterations: Number.isFinite(iterations)
-      ? Math.min(Math.max(Math.round(iterations), 1000), 100000)
-      : 20000,
-    seed:
-      Number.isFinite(Number(payload?.seed)) && payload?.seed !== '' && payload?.seed !== null
-        ? Math.abs(Math.round(Number(payload.seed))) >>> 0
-        : hashSeed(
-            `${ticketA.president}|${ticketA.vice}|${ticketB.president}|${ticketB.vice}|${scenario}`,
-          ),
-  };
-}
-
-function validateTicket(ticket, label) {
-  const president = cleanName(ticket?.president);
-  const vice = cleanName(ticket?.vice);
-  if (!president) throw new Error(`${label}: manca il nome del candidato presidente.`);
-  if (!vice) throw new Error(`${label}: manca il nome del candidato vicepresidente.`);
-  if (president.toLowerCase() === vice.toLowerCase()) {
-    throw new Error(`${label}: presidente e vicepresidente devono essere due persone diverse.`);
-  }
-  return {
-    president,
-    vice,
-    party: typeof ticket?.party === 'string' ? ticket.party.trim().slice(0, 60) : '',
-  };
-}
-
-function cleanName(value) {
-  if (typeof value !== 'string') return '';
-  return value.replace(/\s+/g, ' ').trim().slice(0, 80);
-}
-
-/** Riporta le stime del modello nella forma attesa dal motore di simulazione. */
-function normalizeEstimates(stati) {
-  if (!Array.isArray(stati)) return [];
-  const valid = new Set(UNITS.map((u) => u.code));
-  const seen = new Set();
-  const estimates = [];
-  for (const entry of stati) {
-    const code = typeof entry?.code === 'string' ? entry.code.trim().toUpperCase() : '';
-    if (!valid.has(code) || seen.has(code)) continue;
-    seen.add(code);
-    estimates.push({
-      code,
-      margin: Number(entry.margine_a),
-      uncertainty: Number(entry.incertezza),
-    });
-  }
-  return estimates;
-}
-
-function nationalMarginFrom(nazionale) {
-  const a = Number(nazionale?.voto_a);
-  const b = Number(nazionale?.voto_b);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  return a - b;
-}
-
+/**
+ * Serve la pagina da public/ e, in più, i moduli condivisi di src/: quando il
+ * modello gira nel browser, è la pagina stessa a eseguire simulazione e
+ * orchestrazione, quindi deve poter importare quei file. Fuori da queste due
+ * cartelle non si serve nulla.
+ */
 async function serveStatic(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const relative = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-  const target = path.resolve(PUBLIC_DIR, relative);
 
-  if (!target.startsWith(PUBLIC_DIR + path.sep) && target !== PUBLIC_DIR) {
+  const dentroSrc = relative === 'src' || relative.startsWith('src/');
+  const base = dentroSrc ? SRC_DIR : PUBLIC_DIR;
+  const target = path.resolve(base, dentroSrc ? relative.slice('src/'.length) : relative);
+
+  if (!target.startsWith(base + path.sep) && target !== base) {
+    return sendJson(res, 403, { error: 'Percorso non consentito' });
+  }
+
+  // Da src/ escono solo moduli JavaScript, mai altro.
+  if (dentroSrc && path.extname(target) !== '.js') {
     return sendJson(res, 403, { error: 'Percorso non consentito' });
   }
 
@@ -321,8 +263,8 @@ function sendJson(res, status, body) {
 // Avvia l'ascolto solo quando il file è eseguito direttamente: importarlo da un
 // test non deve occupare la porta.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  server.listen(PORT, () => {
-    const active = activeProvider();
+  server.listen(PORT, async () => {
+    const active = await activeProvider();
     const modeLabel = active.id
       ? `${active.label} · modello ${active.model} (${active.cost})`
       : `nessun provider disponibile: ${active.error}`;
@@ -344,4 +286,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 }
 
-export { server, validateInput, normalizeEstimates };
+export { server };
+export { normalizeEstimates } from './src/result.js';
+export { validateInput } from './src/input.js';

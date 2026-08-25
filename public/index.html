@@ -8,7 +8,7 @@
       name="description"
       content="Simulatore delle elezioni presidenziali americane: scegli due ticket di personaggi famosi e ottieni l'analisi stato per stato."
     />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="styles.css" />
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗳️</text></svg>"
@@ -70,6 +70,23 @@
           <span class="presets-label">Sfide pronte:</span>
           <div id="presets" class="preset-chips"></div>
         </div>
+
+        <fieldset class="engine">
+          <legend>Chi produce l'analisi</legend>
+          <div class="engine-choices" id="engine-choices"></div>
+
+          <div class="engine-detail" id="engine-browser" hidden>
+            <label class="engine-model">
+              Modello da scaricare
+              <select id="webllm-model"></select>
+            </label>
+            <p class="section-sub" id="webllm-note"></p>
+            <div class="loading-track" aria-hidden="true">
+              <div class="loading-bar" id="webllm-bar"></div>
+            </div>
+            <p class="section-sub" id="webllm-status"></p>
+          </div>
+        </fieldset>
 
         <details class="advanced">
           <summary>Contesto e parametri della simulazione</summary>
@@ -266,6 +283,6 @@
       </p>
     </footer>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

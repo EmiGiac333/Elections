@@ -16,7 +16,7 @@
 
 import { resolveProvider } from './providers.js';
 
-const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS ?? 180000);
+const DEFAULT_TIMEOUT_MS = 180000;
 
 /**
  * Chiede al modello un oggetto JSON conforme allo schema.
@@ -33,6 +33,8 @@ export async function chatJson({ system, user, schema, schemaName, target }) {
   const active = target ?? resolveProvider();
 
   switch (active.provider.kind) {
+    case 'webllm':
+      return callWebllm(active, { system, user, schema });
     case 'ollama':
       return callOllama(active, { system, user, schema });
     case 'openai':
@@ -42,6 +44,43 @@ export async function chatJson({ system, user, schema, schemaName, target }) {
     default:
       throw new Error(`Dialetto sconosciuto: ${active.provider.kind}`);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Modello nel browser (WebLLM)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Qui non c'è nessuna rete: il modello è già caricato nella scheda grafica di
+ * chi sta guardando la pagina. `target.engine` è il motore WebLLM, preparato
+ * da public/webllm.js, e parla lo stesso dialetto di OpenAI.
+ */
+async function callWebllm(active, { system, user, schema }) {
+  const engine = active.engine;
+  if (!engine) {
+    throw new Error('Il modello del browser non è stato caricato: ricarica la pagina e riprova.');
+  }
+
+  const reply = await engine.chat.completions.create({
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    // Con lo schema, la decodifica è vincolata dalla grammatica: un modello
+    // piccolo non può più restituire qualcosa che non sia il JSON richiesto.
+    response_format: { type: 'json_object', schema: JSON.stringify(schema) },
+    temperature: 0.7,
+    max_tokens: 4000,
+  });
+
+  return {
+    data: parseJsonLoose(reply?.choices?.[0]?.message?.content ?? ''),
+    model: active.model,
+    usage: {
+      input_tokens: reply?.usage?.prompt_tokens ?? 0,
+      output_tokens: reply?.usage?.completion_tokens ?? 0,
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -63,7 +102,7 @@ async function callOllama(active, { system, user, schema }) {
     ],
   };
 
-  const payload = await postJson(`${active.baseUrl}/api/chat`, body, {}, 'Ollama');
+  const payload = await postJson(`${active.baseUrl}/api/chat`, body, {}, 'Ollama', active.timeoutMs);
   const text = payload?.message?.content ?? '';
   return {
     data: parseJsonLoose(text),
@@ -125,6 +164,7 @@ async function callOpenAiCompatible(active, { system, user, schema, schemaName }
       body,
       headers,
       active.provider.label,
+      active.timeoutMs,
     );
   } catch (error) {
     // Se lo schema viene rifiutato, si riprova con la sola modalità JSON.
@@ -135,6 +175,7 @@ async function callOpenAiCompatible(active, { system, user, schema, schemaName }
         body,
         headers,
         active.provider.label,
+        active.timeoutMs,
       );
     } else {
       throw error;
@@ -204,18 +245,18 @@ async function callAnthropic(active, { system, user, schema }) {
 /* Utilità condivise                                                   */
 /* ------------------------------------------------------------------ */
 
-async function postJson(url, body, headers, label) {
+async function postJson(url, body, headers, label, timeoutMs = DEFAULT_TIMEOUT_MS) {
   let res;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     if (error.name === 'TimeoutError') {
-      throw new Error(`${label} non ha risposto entro ${Math.round(TIMEOUT_MS / 1000)} secondi.`);
+      throw new Error(`${label} non ha risposto entro ${Math.round(timeoutMs / 1000)} secondi.`);
     }
     throw new Error(`Non riesco a contattare ${label} (${url}): ${error.message}`);
   }

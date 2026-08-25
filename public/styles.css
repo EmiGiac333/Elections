@@ -1042,3 +1042,82 @@ button {
   border-radius: 4px;
   padding: 0.05rem 0.3rem;
 }
+
+/* ---------- Scelta del motore ---------- */
+
+.engine {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--surface-2);
+}
+
+.engine legend {
+  font-weight: 650;
+  padding-inline: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.engine-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.6rem;
+}
+
+.engine-choice {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.engine-choice:has(input:checked) {
+  border-color: var(--a-500);
+  box-shadow: inset 0 0 0 1px var(--a-500);
+}
+
+.engine-choice.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.engine-choice input {
+  width: auto;
+  margin-top: 0.2rem;
+  accent-color: var(--a-500);
+}
+
+.engine-choice b {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.engine-choice small {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.engine-detail {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.engine-model {
+  max-width: 34rem;
+}
+
+.engine-model select {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+}

@@ -3,6 +3,20 @@
  * disegna mappa, distribuzione degli esiti e analisi.
  */
 
+import { UNITS } from '../src/states.js';
+import { validateInput } from '../src/input.js';
+import { analyzeElection } from '../src/ai.js';
+import { offlineAnalysis } from '../src/offline.js';
+import { buildSimulationResult } from '../src/result.js';
+import {
+  availableModels,
+  loadedModelId,
+  prepareEngine,
+  suggestModel,
+  webgpuSupport,
+  webllmTarget,
+} from './webllm.js';
+
 const $ = (id) => document.getElementById(id);
 
 const form = $('form');
@@ -14,6 +28,8 @@ const tooltip = $('map-tooltip');
 let meta = null;
 let lastResponse = null;
 let sortState = { key: 'expectedMargin', dir: 'desc' };
+let engineMode = 'demo'; // 'browser' | 'server' | 'demo'
+let webgpu = { ok: false, reason: 'controllo non ancora eseguito' };
 
 const PRESETS = [
   {
@@ -52,12 +68,17 @@ init();
 
 async function init() {
   renderPresets();
+  // Senza server dietro (pagina statica, oppure server spento) non è un errore:
+  // il modello del browser e la modalità dimostrativa funzionano lo stesso.
   try {
-    meta = await (await fetch('/api/meta')).json();
-    renderModeBadge(meta);
+    const res = await fetch('api/meta');
+    if (res.ok) meta = await res.json();
   } catch {
-    showError('Non riesco a contattare il server del simulatore.');
+    meta = null;
   }
+  renderModeBadge(meta);
+
+  await setupEngines();
 
   form.addEventListener('submit', onSubmit);
   $('random').addEventListener('click', fillRandom);
@@ -68,7 +89,7 @@ async function init() {
 
 function renderModeBadge(m) {
   const badge = $('mode-badge');
-  const p = m.provider ?? {};
+  const p = m?.provider ?? {};
   badge.hidden = false;
   if (!p.id) {
     badge.className = 'mode-badge demo';
@@ -148,7 +169,192 @@ async function onSubmit(event) {
     return showError('Completa entrambi i nomi del ticket B.');
   }
 
-  await runSimulation(payload);
+  if (engineMode === 'browser') return runInBrowser(payload);
+  if (engineMode === 'demo') {
+    // La modalità dimostrativa non ha bisogno di nessun server: gira qui.
+    try {
+      return runDemoLocally(payload);
+    } catch (error) {
+      return showError(error.message);
+    }
+  }
+  return runOnServer(payload);
+}
+
+/* ------------------------------------------------------------------ */
+/* Scelta del motore                                                   */
+/* ------------------------------------------------------------------ */
+
+async function setupEngines() {
+  webgpu = await webgpuSupport();
+
+  const serverPronto = Boolean(meta?.provider?.ready);
+  const opzioni = [
+    {
+      id: 'browser',
+      titolo: 'Modello nel tuo browser',
+      nota: webgpu.ok
+        ? 'Nessuna API e nessuna chiave: il modello si scarica una volta e gira sulla tua scheda grafica.'
+        : `Non disponibile qui. ${webgpu.reason}`,
+      disabilitata: !webgpu.ok,
+    },
+    {
+      id: 'server',
+      titolo: 'Modello configurato sul server',
+      nota: serverPronto
+        ? `Attivo: ${meta.provider.label} · ${meta.provider.model}.`
+        : meta?.provider?.needsKey
+          ? `Non configurato: manca ${meta.provider.apiKeyEnv}.`
+          : meta?.provider?.id
+            ? `${meta.provider.label} non risponde: il server non ha un modello pronto.`
+            : 'Nessun server dietro questa pagina.',
+      disabilitata: !serverPronto,
+    },
+    {
+      id: 'demo',
+      titolo: 'Modalità dimostrativa',
+      nota: 'Nessun modello: i numeri vengono da una formula sui nomi. Serve solo a vedere come funziona.',
+      disabilitata: false,
+    },
+  ];
+
+  // Si preferisce il modello del browser, poi il server, e la modalità
+  // dimostrativa solo se non resta altro.
+  engineMode = opzioni.find((o) => !o.disabilitata)?.id ?? 'demo';
+
+  $('engine-choices').innerHTML = opzioni
+    .map(
+      (o) => `
+      <label class="engine-choice${o.disabilitata ? ' disabled' : ''}">
+        <input type="radio" name="engine" value="${o.id}"
+          ${o.id === engineMode ? 'checked' : ''} ${o.disabilitata ? 'disabled' : ''} />
+        <span>
+          <b>${escapeHtml(o.titolo)}</b>
+          <small>${escapeHtml(o.nota)}</small>
+        </span>
+      </label>`,
+    )
+    .join('');
+
+  for (const radio of document.querySelectorAll('input[name="engine"]')) {
+    radio.addEventListener('change', () => {
+      engineMode = radio.value;
+      onEngineChange();
+    });
+  }
+
+  if (webgpu.ok) await fillModelList();
+  onEngineChange();
+}
+
+function onEngineChange() {
+  $('engine-browser').hidden = engineMode !== 'browser';
+}
+
+async function fillModelList() {
+  const select = $('webllm-model');
+  try {
+    const modelli = await availableModels();
+    if (!modelli.length) throw new Error('la libreria non elenca nessun modello utilizzabile');
+
+    const consigliato = suggestModel(modelli);
+    select.innerHTML = modelli
+      .map(
+        (m) =>
+          `<option value="${escapeHtml(m.id)}" ${m.id === consigliato ? 'selected' : ''}>` +
+          `${escapeHtml(m.id)} — ${(m.vramMB / 1024).toFixed(1)} GB</option>`,
+      )
+      .join('');
+
+    $('webllm-note').textContent =
+      'Il modello si scarica una volta sola e resta nella cache del browser. ' +
+      'I modelli più grandi ragionano meglio ma richiedono più memoria video.';
+  } catch (error) {
+    select.innerHTML = '';
+    $('webllm-note').textContent = `Non riesco a leggere l'elenco dei modelli: ${error.message}`;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Percorso 1: tutto nel browser                                       */
+/* ------------------------------------------------------------------ */
+
+async function runInBrowser(payload) {
+  const modelId = $('webllm-model').value;
+  if (!modelId) return showError('Scegli prima un modello da scaricare.');
+
+  setBusy(true);
+  const startedAt = Date.now();
+
+  try {
+    let input;
+    try {
+      input = validateInput(payload);
+    } catch (error) {
+      throw new SimulationError(error.message, false);
+    }
+
+    if (loadedModelId() !== modelId) {
+      showProgress({ step: 0, total: 0, label: `Scarico il modello ${modelId}…` });
+    }
+    await prepareEngine(modelId, ({ progress, text }) => {
+      $('webllm-bar').style.width = `${Math.round((progress ?? 0) * 100)}%`;
+      $('webllm-status').textContent = text ?? '';
+    });
+    $('webllm-bar').style.width = '100%';
+
+    const target = webllmTarget(modelId);
+    const { analysis, model, usage, failures } = await analyzeElection(
+      input,
+      (fase) => showProgress(fase),
+      target,
+    );
+
+    showProgress({ step: 0, total: 0, label: 'Simulazione delle elezioni' });
+    finish(
+      buildSimulationResult({
+        input,
+        analysis,
+        mode: 'ai',
+        model,
+        provider: {
+          id: 'webllm',
+          label: 'Modello nel browser',
+          free: true,
+          cost: 'gratuito: gira sul tuo computer',
+          reason: 'nessuna API interrogata',
+        },
+        usage,
+        failures,
+        elapsedMs: Date.now() - startedAt,
+      }),
+    );
+  } catch (error) {
+    showError(error.message, !(error instanceof SimulationError) || error.canFallback);
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** La modalità dimostrativa non ha bisogno di nessun server. */
+function runDemoLocally(payload) {
+  const startedAt = Date.now();
+  const input = validateInput(payload);
+  finish(
+    buildSimulationResult({
+      input,
+      analysis: offlineAnalysis(input),
+      mode: 'demo',
+      elapsedMs: Date.now() - startedAt,
+    }),
+  );
+}
+
+function finish(result) {
+  lastResponse = result;
+  render(result);
+  results.hidden = false;
+  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /**
@@ -156,10 +362,10 @@ async function onSubmit(event) {
  * risultato. Con un modello locale l'analisi dura minuti, e mostrare a che
  * punto è evita che sembri bloccata.
  */
-async function runSimulation(payload) {
+async function runOnServer(payload) {
   setBusy(true);
   try {
-    const res = await fetch('/api/simulate', {
+    const res = await fetch('api/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -178,11 +384,7 @@ async function runSimulation(payload) {
     }
 
     if (!result) throw new Error('Il server ha chiuso la risposta senza inviare un risultato.');
-
-    lastResponse = result;
-    render(result);
-    results.hidden = false;
-    results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    finish(result);
   } catch (error) {
     showError(error.message, error instanceof SimulationError && error.canFallback);
   } finally {
@@ -250,7 +452,11 @@ function showError(message, canFallback = false) {
   if (canFallback) {
     fallback.onclick = () => {
       hideError();
-      runSimulation({ ...formPayload(), mode: 'demo' });
+      try {
+        runDemoLocally(formPayload());
+      } catch (error) {
+        showError(error.message);
+      }
     };
   }
 }
@@ -357,7 +563,7 @@ function renderMap(res) {
 
   const byCode = new Map(res.simulation.states.map((s) => [s.code, s]));
 
-  for (const unit of meta.units) {
+  for (const unit of UNITS) {
     const state = byCode.get(unit.code);
     if (!state) continue;
     const tile = buildTile(unit, state, res);
