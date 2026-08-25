@@ -3,11 +3,11 @@
  * disegna mappa, distribuzione degli esiti e analisi.
  */
 
-import { UNITS } from '../src/states.js';
-import { validateInput } from '../src/input.js';
-import { analyzeElection } from '../src/ai.js';
-import { offlineAnalysis } from '../src/offline.js';
-import { buildSimulationResult } from '../src/result.js';
+import { UNITS } from './src/states.js';
+import { validateInput } from './src/input.js';
+import { analyzeElection } from './src/ai.js';
+import { offlineAnalysis } from './src/offline.js';
+import { buildSimulationResult } from './src/result.js';
 import {
   availableModels,
   loadedModelId,

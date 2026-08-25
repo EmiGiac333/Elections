@@ -7,7 +7,7 @@ import { analyzeElection } from '../src/ai.js';
 import { buildSimulationResult } from '../src/result.js';
 import { validateInput } from '../src/input.js';
 import { UNITS } from '../src/states.js';
-import { suggestModel } from '../public/webllm.js';
+import { filterModels, suggestModel } from '../src/model-picker.js';
 
 /**
  * Motore finto che parla come WebLLM. Il modello vero gira su WebGPU e i suoi
@@ -196,4 +196,21 @@ test('la scelta automatica del modello preferisce il più grande che sta sotto i
   assert.equal(suggestModel(modelli), 'medio');
   assert.equal(suggestModel([{ id: 'enorme', vramMB: 5800 }]), 'enorme');
   assert.equal(suggestModel([]), '');
+});
+
+test('il catalogo tiene solo i modelli utilizzabili, ordinati per memoria', () => {
+  const scelti = filterModels([
+    { model_id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', vram_required_MB: 2951 },
+    { model_id: 'gemma-2-2b-it-q4f16_1-MLC', vram_required_MB: 1895 },
+    { model_id: 'snowflake-arctic-embedding-MLC', vram_required_MB: 500 },
+    { model_id: 'DeepSeek-R1-Distill-Qwen-7B-MLC', vram_required_MB: 5106 },
+    { model_id: 'Llama-3-70B-Instruct-MLC', vram_required_MB: 40000 },
+    { model_id: 'qualcosa-senza-istruzioni-MLC', vram_required_MB: 1200 },
+  ]);
+
+  assert.deepEqual(
+    scelti.map((m) => m.id),
+    ['gemma-2-2b-it-q4f16_1-MLC', 'Llama-3.2-3B-Instruct-q4f16_1-MLC'],
+  );
+  assert.equal(scelti[0].vramMB, 1895);
 });

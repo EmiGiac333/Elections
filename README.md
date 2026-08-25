@@ -115,14 +115,34 @@ Node persistente (Koyeb, Hugging Face Spaces con SDK Docker). Non funzionano inv
 *serverless* con limite di durata sulla singola richiesta — Vercel, Netlify, Cloudflare Workers —
 perché una richiesta al modello remoto resta aperta finché il modello lavora, anche per minuti.
 
-### Anche solo file statici (GitHub Pages)
+## Pubblicare su GitHub Pages (gratuito, senza nessun server)
 
-Da quando il modello può girare nel browser, la pagina non ha più bisogno di un server: il modello
-nel browser e la modalità dimostrativa funzionano anche pubblicando il repository come sito
-statico. Su GitHub Pages, con la pubblicazione dalla radice del ramo, l'indirizzo è
-`https://<utente>.github.io/<repo>/public/`. Quello che non funziona lì sono le opzioni che
-passano dal server (Ollama e le chiavi cloud): la pagina se ne accorge da sola e le disattiva,
-perché `api/meta` non risponde.
+Da quando il modello può girare nel browser, la pagina non ha più bisogno di un server: basta
+pubblicarla come sito statico. C'è già il workflow che lo fa a ogni push.
+
+Da fare una volta sola: **Settings → Pages → Source: "GitHub Actions"**. Senza questa scelta il
+passo di pubblicazione fallisce, perché Pages resterebbe in attesa di un ramo da cui pubblicare.
+
+Da lì in poi `.github/workflows/pages.yml` fa tutto a ogni push: esegue i test, assembla il sito e
+lo pubblica. Il sito si può anche assemblare in locale, per vedere esattamente cosa verrà
+pubblicato:
+
+```bash
+npm run build:site
+npx serve site        # oppure qualunque server di file statici
+```
+
+Lo script mette il contenuto di `public/` nella radice del sito e i moduli condivisi sotto
+`site/src/`: la stessa forma che il server espone a runtime, così gli stessi import funzionano nei
+due casi senza differenze.
+
+Sul sito pubblicato funzionano il **modello nel browser** e la **modalità dimostrativa**. Non
+funzionano le opzioni che passano da un server — Ollama e le chiavi cloud — perché lì un server non
+c'è: la pagina se ne accorge da sola (`api/meta` non risponde) e le disattiva spiegando il perché,
+invece di fallire a metà simulazione.
+
+Le due pubblicazioni non si escludono: Pages per la versione che gira nel browser di chiunque,
+Render per quella che usa un modello configurato da te.
 
 ## Variabili d'ambiente
 
@@ -188,6 +208,8 @@ identico. La parte variabile è solo la risposta del modello.
 ```
 server.js                 server HTTP (solo moduli Node) + endpoint /api/simulate
 render.yaml               configurazione per il deploy gratuito su Render
+.github/workflows/        pubblicazione automatica su GitHub Pages a ogni push
+scripts/build-site.mjs    assembla il sito statico in site/
 src/providers.js          i provider disponibili e la scelta di quello attivo
 src/llm.js                dialetti WebLLM, Ollama, OpenAI-compatibile e Anthropic
 src/schema.js             schemi JSON del profilo e dei blocchi di collegi
@@ -197,6 +219,7 @@ src/result.js             assemblaggio del risultato, condiviso fra server e bro
 src/input.js              validazione dei dati del modulo, condivisa fra server e browser
 src/states.js             i 56 collegi: grandi elettori, base 2024, regione, elasticità, mappa
 src/offline.js            modello euristico della modalità dimostrativa
+src/model-picker.js       quali modelli proporre nel browser e quale preselezionare
 public/webllm.js          caricamento del modello nel browser e scelta fra quelli disponibili
 public/webllm-worker.js   il modello gira qui, non sul thread della pagina
 public/                   interfaccia (HTML/CSS/JS, nessun framework)
@@ -239,7 +262,7 @@ servizi di hosting chiudono le connessioni rimaste mute troppo a lungo.
 npm test
 ```
 
-38 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
+39 test su: somma dei 538 grandi elettori, unicità delle tessere sulla mappa, coerenza e
 riproducibilità della simulazione, validazione degli input, scelta del provider, forma degli
 schemi, parser JSON tollerante (recinti markdown, preamboli, blocchi di ragionamento, risposte
 troncate), gli endpoint HTTP e l'intera catena del modello nel browser con un motore finto —

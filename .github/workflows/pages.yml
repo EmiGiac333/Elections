@@ -1,0 +1,78 @@
+# Pubblica il simulatore su GitHub Pages.
+#
+# Il sito che viene pubblicato non ha nessun server dietro: funzionano il
+# modello che gira nel browser di chi apre la pagina e la modalità dimostrativa.
+# Le opzioni che passano da un server (Ollama, chiavi cloud) restano disattivate
+# lì, e la pagina lo dichiara da sola.
+#
+# Da fare una volta sola nelle impostazioni del repository:
+#   Settings → Pages → Source: "GitHub Actions"
+# Senza quella scelta il passo di pubblicazione fallisce, perché Pages resterebbe
+# in attesa di un ramo da cui pubblicare.
+
+name: Pubblica su GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/us-election-simulator-fk23rb
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Una pubblicazione per volta, senza annullare quella in corso: interromperla a
+# metà lascerebbe il sito in uno stato incerto.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Il progetto non ha dipendenze obbligatorie: non c'è niente da installare
+      # e nessuna cache da riempire.
+      - name: Esegui i test
+        run: npm test
+
+  build:
+    name: Assembla il sito
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Assembla site/
+        run: npm run build:site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+  deploy:
+    name: Pubblica
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
