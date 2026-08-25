@@ -31,6 +31,16 @@ let sortState = { key: 'expectedMargin', dir: 'desc' };
 let engineMode = 'demo'; // 'browser' | 'server' | 'demo'
 let webgpu = { ok: false, reason: 'controllo non ancora eseguito' };
 
+/**
+ * Dispositivo con poca memoria e GPU lenta, in pratica un telefono o un tablet.
+ * Non è una diagnosi esatta — nessuna API la dà — ma basta a scegliere un
+ * modello più piccolo e ad avvisare che l'attesa sarà lunga.
+ */
+const compactDevice =
+  navigator.userAgentData?.mobile === true ||
+  (matchMedia('(pointer: coarse)').matches && matchMedia('(max-width: 900px)').matches) ||
+  (navigator.deviceMemory ?? 8) <= 4;
+
 const PRESETS = [
   {
     label: 'Swift/Hanks contro Musk/Johnson',
@@ -76,7 +86,6 @@ async function init() {
   } catch {
     meta = null;
   }
-  renderModeBadge(meta);
 
   await setupEngines();
 
@@ -87,19 +96,34 @@ async function init() {
     .forEach((th) => th.addEventListener('click', () => sortTable(th.dataset.sort)));
 }
 
-function renderModeBadge(m) {
+/**
+ * La targhetta racconta chi produrrà l'analisi adesso, non cosa manca al
+ * server: su un sito statico "nessun provider configurato" è la normalità, non
+ * un guasto, e leggerlo in rosso spaventa senza motivo.
+ */
+function renderModeBadge() {
   const badge = $('mode-badge');
-  const p = m?.provider ?? {};
   badge.hidden = false;
-  if (!p.id) {
-    badge.className = 'mode-badge demo';
-    badge.textContent = 'Nessun provider configurato';
-    badge.title = p.error ?? '';
+
+  if (engineMode === 'browser') {
+    const modello = $('webllm-model')?.value ?? '';
+    badge.className = 'mode-badge ai';
+    badge.textContent = `Modello nel browser${modello ? ` · ${modello.replace(/-MLC$/, '')}` : ''}`;
+    badge.title = 'Gira sul tuo dispositivo: nessuna API, nessuna chiave, nessun costo.';
     return;
   }
-  badge.className = `mode-badge ${p.free ? 'ai' : 'paid'}`;
-  badge.textContent = `${p.label} · ${p.model}${p.free ? ' · gratuito' : ' · a pagamento'}`;
-  badge.title = `${p.cost} — ${p.reason ?? ''}`;
+
+  if (engineMode === 'server') {
+    const p = meta?.provider ?? {};
+    badge.className = `mode-badge ${p.free ? 'ai' : 'paid'}`;
+    badge.textContent = `${p.label} · ${p.model}${p.free ? ' · gratuito' : ' · a pagamento'}`;
+    badge.title = `${p.cost ?? ''} — ${p.reason ?? ''}`;
+    return;
+  }
+
+  badge.className = 'mode-badge demo';
+  badge.textContent = 'Modalità dimostrativa';
+  badge.title = 'Nessun modello interrogato: i numeri vengono da una formula sui nomi.';
 }
 
 function renderPresets() {
@@ -193,9 +217,11 @@ async function setupEngines() {
     {
       id: 'browser',
       titolo: 'Modello nel tuo browser',
-      nota: webgpu.ok
-        ? 'Nessuna API e nessuna chiave: il modello si scarica una volta e gira sulla tua scheda grafica.'
-        : `Non disponibile qui. ${webgpu.reason}`,
+      nota: !webgpu.ok
+        ? `Non disponibile qui. ${webgpu.reason}`
+        : compactDevice
+          ? 'Funziona, ma su un telefono una simulazione richiede dai 10 ai 25 minuti e il modello può non entrare in memoria. Meglio da computer.'
+          : 'Nessuna API e nessuna chiave: il modello si scarica una volta e gira sulla tua scheda grafica.',
       disabilitata: !webgpu.ok,
     },
     {
@@ -219,8 +245,12 @@ async function setupEngines() {
   ];
 
   // Si preferisce il modello del browser, poi il server, e la modalità
-  // dimostrativa solo se non resta altro.
-  engineMode = opzioni.find((o) => !o.disabilitata)?.id ?? 'demo';
+  // dimostrativa solo se non resta altro. Su un telefono il modello del browser
+  // resta disponibile ma non preselezionato: sceglierlo deve essere una
+  // decisione consapevole, viste le attese.
+  const ordine = compactDevice ? ['server', 'browser', 'demo'] : ['browser', 'server', 'demo'];
+  engineMode =
+    ordine.find((id) => !opzioni.find((o) => o.id === id).disabilitata) ?? 'demo';
 
   $('engine-choices').innerHTML = opzioni
     .map(
@@ -243,12 +273,15 @@ async function setupEngines() {
     });
   }
 
+  $('webllm-model').addEventListener('change', renderModeBadge);
+
   if (webgpu.ok) await fillModelList();
   onEngineChange();
 }
 
 function onEngineChange() {
   $('engine-browser').hidden = engineMode !== 'browser';
+  renderModeBadge();
 }
 
 async function fillModelList() {
@@ -257,18 +290,20 @@ async function fillModelList() {
     const modelli = await availableModels();
     if (!modelli.length) throw new Error('la libreria non elenca nessun modello utilizzabile');
 
-    const consigliato = suggestModel(modelli);
+    const consigliato = suggestModel(modelli, { compact: compactDevice });
     select.innerHTML = modelli
       .map(
         (m) =>
           `<option value="${escapeHtml(m.id)}" ${m.id === consigliato ? 'selected' : ''}>` +
-          `${escapeHtml(m.id)} — ${(m.vramMB / 1024).toFixed(1)} GB</option>`,
+          `${escapeHtml(m.etichetta)} — ${(m.vramMB / 1024).toFixed(1)} GB da scaricare</option>`,
       )
       .join('');
 
-    $('webllm-note').textContent =
-      'Il modello si scarica una volta sola e resta nella cache del browser. ' +
-      'I modelli più grandi ragionano meglio ma richiedono più memoria video.';
+    $('webllm-note').textContent = compactDevice
+      ? 'Su questo dispositivo è preselezionato il modello più piccolo: gli altri rischiano di non entrare in memoria. ' +
+        'Il modello si scarica una volta sola e resta nella cache del browser.'
+      : 'Il modello si scarica una volta sola e resta nella cache del browser. ' +
+        'I modelli più grandi ragionano meglio ma richiedono più memoria video.';
   } catch (error) {
     select.innerHTML = '';
     $('webllm-note').textContent = `Non riesco a leggere l'elenco dei modelli: ${error.message}`;
@@ -294,10 +329,8 @@ async function runInBrowser(payload) {
       throw new SimulationError(error.message, false);
     }
 
-    if (loadedModelId() !== modelId) {
-      showProgress({ step: 0, total: 0, label: `Scarico il modello ${modelId}…` });
-    }
     await prepareEngine(modelId, ({ progress, text }) => {
+      showDownload({ progress, text });
       $('webllm-bar').style.width = `${Math.round((progress ?? 0) * 100)}%`;
       $('webllm-status').textContent = text ?? '';
     });
@@ -419,6 +452,8 @@ async function* readNdjson(res) {
 }
 
 let loadingTimer = null;
+let loadingStart = 0;
+let analysisStart = 0; // quando è iniziata l'analisi vera, scaricamento escluso
 
 function setBusy(busy) {
   $('submit').disabled = busy;
@@ -428,19 +463,65 @@ function setBusy(busy) {
     clearInterval(loadingTimer);
     return;
   }
-  const started = Date.now();
+  loadingStart = Date.now();
+  analysisStart = 0;
   $('loading-step').textContent = FIRST_STEP;
-  $('loading-elapsed').textContent = '0 s';
   $('loading-bar').style.width = '0%';
-  loadingTimer = setInterval(() => {
-    $('loading-elapsed').textContent = `${Math.round((Date.now() - started) / 1000)} s`;
-  }, 1000);
+  setElapsed('');
+  loadingTimer = setInterval(() => setElapsed(), 1000);
 }
 
+function setElapsed(nota) {
+  const secondi = Math.round((Date.now() - loadingStart) / 1000);
+  $('loading-elapsed').textContent = durata(secondi);
+  if (nota !== undefined) $('loading-hint').textContent = nota;
+}
+
+/** Avanzamento dello scaricamento del modello: percentuale vera, non finta. */
+function showDownload({ progress, text }) {
+  const percento = Math.round((progress ?? 0) * 100);
+  $('loading-step').textContent = `Scarico il modello… ${percento}%`;
+  $('loading-bar').style.width = `${percento}%`;
+  setElapsed(
+    text ||
+      'Si scarica una volta sola e resta nella cache del browser: le simulazioni successive partono subito.',
+  );
+}
+
+/**
+ * Avanzamento dell'analisi. Dal tempo dei blocchi già fatti si ricava una stima
+ * di quanto manca: davanti a un'attesa di minuti, sapere che sta procedendo è
+ * la differenza fra aspettare e credere che sia bloccata.
+ */
 function showProgress({ step, total, label }) {
-  $('loading-step').textContent =
-    total > 0 ? `${label} (${step} di ${total})` : label || FIRST_STEP;
-  $('loading-bar').style.width = total > 0 ? `${Math.round((step / total) * 100)}%` : '100%';
+  if (total <= 0) {
+    $('loading-step').textContent = label || FIRST_STEP;
+    $('loading-bar').style.width = '100%';
+    setElapsed('Ultimo passaggio: la simulazione Monte Carlo è questione di istanti.');
+    return;
+  }
+
+  if (!analysisStart) analysisStart = Date.now();
+  $('loading-step').textContent = `${label} — ${step} di ${total}`;
+  $('loading-bar').style.width = `${Math.round((step / total) * 100)}%`;
+
+  const fatti = step - 1;
+  if (fatti < 1) {
+    setElapsed('I 56 collegi vengono analizzati a blocchi, uno dopo l\'altro.');
+    return;
+  }
+
+  const perBlocco = (Date.now() - analysisStart) / fatti;
+  const mancano = Math.round(((total - fatti) * perBlocco) / 1000);
+  setElapsed(`Ancora ${durata(mancano)} circa, se il ritmo resta questo.`);
+}
+
+function durata(secondi) {
+  if (!Number.isFinite(secondi) || secondi < 0) return '—';
+  if (secondi < 90) return `${secondi} s`;
+  const minuti = Math.floor(secondi / 60);
+  const resto = secondi % 60;
+  return resto < 10 ? `${minuti} min` : `${minuti} min ${resto} s`;
 }
 
 function showError(message, canFallback = false) {

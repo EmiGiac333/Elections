@@ -198,19 +198,51 @@ test('la scelta automatica del modello preferisce il più grande che sta sotto i
   assert.equal(suggestModel([]), '');
 });
 
-test('il catalogo tiene solo i modelli utilizzabili, ordinati per memoria', () => {
+test('su un dispositivo compatto si prende il modello più piccolo, non il migliore', () => {
+  const modelli = [
+    { id: 'piccolo', vramMB: 900 },
+    { id: 'medio', vramMB: 2800 },
+    { id: 'grande', vramMB: 5200 },
+  ];
+  assert.equal(suggestModel(modelli, { compact: true }), 'piccolo');
+  assert.equal(suggestModel([], { compact: true }), '');
+});
+
+test('il catalogo scarta le trappole del listino, non solo i modelli grandi', () => {
   const scelti = filterModels([
-    { model_id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', vram_required_MB: 2951 },
-    { model_id: 'gemma-2-2b-it-q4f16_1-MLC', vram_required_MB: 1895 },
-    { model_id: 'snowflake-arctic-embedding-MLC', vram_required_MB: 500 },
-    { model_id: 'DeepSeek-R1-Distill-Qwen-7B-MLC', vram_required_MB: 5106 },
-    { model_id: 'Llama-3-70B-Instruct-MLC', vram_required_MB: 40000 },
-    { model_id: 'qualcosa-senza-istruzioni-MLC', vram_required_MB: 1200 },
+    { model_id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC', vram_required_MB: 2505 },
+    { model_id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', vram_required_MB: 879 },
+    // Contesto da 1024 token: il prompt di un blocco non ci starebbe.
+    { model_id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC-1k', vram_required_MB: 2264 },
+    // Famiglia del 2023: per dimensione vincerebbe, per qualità è la peggiore.
+    { model_id: 'RedPajama-INCITE-Chat-3B-v1-q4f16_1-MLC', vram_required_MB: 2041 },
+    { model_id: 'TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC', vram_required_MB: 697 },
+    // Specializzati o con vista: peso in più senza vantaggio qui.
+    { model_id: 'Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC', vram_required_MB: 2505 },
+    { model_id: 'Phi-3.5-vision-instruct-q4f16_1-MLC', vram_required_MB: 3952 },
+    // Stessa rete, quantizzazione più pesante: sarebbe un doppione nel menù.
+    { model_id: 'Qwen2.5-3B-Instruct-q4f32_1-MLC', vram_required_MB: 3200 },
+    // Troppo grande per una scheda comune.
+    { model_id: 'Llama-3.1-70B-Instruct-q4f16_1-MLC', vram_required_MB: 40000 },
   ]);
 
   assert.deepEqual(
     scelti.map((m) => m.id),
-    ['gemma-2-2b-it-q4f16_1-MLC', 'Llama-3.2-3B-Instruct-q4f16_1-MLC'],
+    ['Llama-3.2-1B-Instruct-q4f16_1-MLC', 'Qwen2.5-3B-Instruct-q4f16_1-MLC'],
   );
-  assert.equal(scelti[0].vramMB, 1895);
+  assert.equal(scelti[1].etichetta, 'Qwen2.5-3B');
+});
+
+test("il predefinito non è il più piccolo utile né il più grande possibile", () => {
+  const catalogo = filterModels([
+    { model_id: 'SmolLM2-360M-Instruct-q4f16_1-MLC', vram_required_MB: 376 },
+    { model_id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', vram_required_MB: 879 },
+    { model_id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC', vram_required_MB: 2505 },
+    { model_id: 'Llama-3.1-8B-Instruct-q4f16_1-MLC', vram_required_MB: 5001 },
+  ]);
+
+  // Su un computer: il più capace che sta sotto i 3 GB.
+  assert.equal(suggestModel(catalogo), 'Qwen2.5-3B-Instruct-q4f16_1-MLC');
+  // Su un telefono: il più piccolo che abbia ancora senso, non il minuscolo.
+  assert.equal(suggestModel(catalogo, { compact: true }), 'Llama-3.2-1B-Instruct-q4f16_1-MLC');
 });
