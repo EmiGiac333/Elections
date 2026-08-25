@@ -1121,3 +1121,9 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.82rem;
 }
+
+.loading-stop {
+  margin-top: 0.7rem;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+}

@@ -9,8 +9,11 @@ import { analyzeElection } from './src/ai.js';
 import { offlineAnalysis } from './src/offline.js';
 import { buildSimulationResult } from './src/result.js';
 import {
+  TOKEN_ANALISI_COMPLETA,
   availableModels,
+  interrompiGenerazione,
   loadedModelId,
+  misuraVelocita,
   prepareEngine,
   suggestModel,
   webgpuSupport,
@@ -29,6 +32,7 @@ let meta = null;
 let lastResponse = null;
 let sortState = { key: 'expectedMargin', dir: 'desc' };
 let engineMode = 'demo'; // 'browser' | 'server' | 'demo'
+let annullamento = null; // AbortController della simulazione in corso
 let webgpu = { ok: false, reason: 'controllo non ancora eseguito' };
 
 /**
@@ -91,6 +95,14 @@ async function init() {
 
   form.addEventListener('submit', onSubmit);
   $('random').addEventListener('click', fillRandom);
+  $('stop').addEventListener('click', () => {
+    // Due strade: fermare la generazione in corso se il motore lo permette, e
+    // comunque non far partire il blocco successivo.
+    interrompiGenerazione();
+    annullamento?.abort();
+    $('loading-step').textContent = 'Interruzione in corso…';
+  });
+
   document
     .querySelectorAll('.states-table th[data-sort]')
     .forEach((th) => th.addEventListener('click', () => sortTable(th.dataset.sort)));
@@ -346,11 +358,30 @@ async function runInBrowser(payload) {
         'Il motore in secondo piano non è disponibile su questo browser: il calcolo gira in primo piano e la pagina resterà ferma finché non finisce.';
     }
 
+    // Prima di impegnare mezz'ora, si misura quanto va davvero questo
+    // dispositivo: distingue "lentissimo" da "bloccato" e permette di dire in
+    // anticipo quanto durerà, invece di scoprirlo dopo venti minuti.
+    $('loading-step').textContent = 'Misuro la velocità del dispositivo…';
+    setElapsed('Una generazione minuscola di prova, per stimare i tempi.');
+    const { tokenAlSecondo } = await misuraVelocita();
+
+    const secondiStimati = Math.round(TOKEN_ANALISI_COMPLETA / Math.max(tokenAlSecondo, 0.05));
+    const ritmo = `${tokenAlSecondo.toFixed(1)} token al secondo`;
+    if (tokenAlSecondo < 3) {
+      $('webllm-status').textContent =
+        `Questo dispositivo produce ${ritmo}: l'analisi completa richiederà circa ${durata(secondiStimati)}. ` +
+        'Su un computer con scheda grafica dedicata sono pochi minuti.';
+    }
+
+    annullamento = new AbortController();
+    $('stop').hidden = false;
+
     const target = webllmTarget(modelId);
     const { analysis, model, usage, failures } = await analyzeElection(
       input,
-      (fase) => showProgress(fase),
+      (fase) => showProgress(fase, secondiStimati),
       target,
+      { signal: annullamento.signal },
     );
 
     showProgress({ step: 0, total: 0, label: 'Simulazione delle elezioni' });
@@ -373,7 +404,12 @@ async function runInBrowser(payload) {
       }),
     );
   } catch (error) {
-    showError(error.message, !(error instanceof SimulationError) || error.canFallback);
+    if (/interrotta/i.test(error.message)) {
+      // Interruzione chiesta dall'utente: non è un guasto, non va allarmata.
+      showError('Simulazione interrotta. Il modello resta caricato: puoi ripartire quando vuoi.');
+    } else {
+      showError(error.message, !(error instanceof SimulationError) || error.canFallback);
+    }
   } finally {
     setBusy(false);
   }
@@ -471,6 +507,8 @@ function setBusy(busy) {
   loading.hidden = !busy;
   if (!busy) {
     clearInterval(loadingTimer);
+    $('stop').hidden = true;
+    annullamento = null;
     return;
   }
   loadingStart = Date.now();
@@ -503,7 +541,7 @@ function showDownload({ progress, text }) {
  * di quanto manca: davanti a un'attesa di minuti, sapere che sta procedendo è
  * la differenza fra aspettare e credere che sia bloccata.
  */
-function showProgress({ step, total, label }) {
+function showProgress({ step, total, label }, secondiStimati = 0) {
   if (total <= 0) {
     $('loading-step').textContent = label || FIRST_STEP;
     $('loading-bar').style.width = '100%';
@@ -517,7 +555,11 @@ function showProgress({ step, total, label }) {
 
   const fatti = step - 1;
   if (fatti < 1) {
-    setElapsed('I 56 collegi vengono analizzati a blocchi, uno dopo l\'altro.');
+    setElapsed(
+      secondiStimati > 0
+        ? `Stima iniziale: circa ${durata(secondiStimati)} in tutto.`
+        : "I 56 collegi vengono analizzati a blocchi, uno dopo l'altro.",
+    );
     return;
   }
 

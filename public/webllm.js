@@ -176,6 +176,43 @@ async function scaricaMotore() {
   loadedModel = null;
 }
 
+/** Token di uscita che l'analisi completa richiede, per stimare i tempi. */
+export const TOKEN_ANALISI_COMPLETA = 5000;
+
+/**
+ * Misura quanti token al secondo produce davvero questo dispositivo.
+ *
+ * Serve a due cose insieme: dimostrare che il motore risponde — un'attesa
+ * infinita e una generazione lentissima sono indistinguibili dall'esterno — e
+ * dare una stima onesta della durata prima di impegnare mezz'ora dell'utente.
+ * La prova è volutamente minuscola e senza schema, così misura il motore e non
+ * la compilazione della grammatica.
+ */
+export async function misuraVelocita() {
+  if (!engine) throw new Error('Nessun modello caricato.');
+
+  const token = 16;
+  const inizio = Date.now();
+  const risposta = await engine.chat.completions.create({
+    messages: [{ role: 'user', content: 'Conta da uno a venti.' }],
+    max_tokens: token,
+    temperature: 0,
+  });
+  const secondi = (Date.now() - inizio) / 1000;
+
+  const prodotti = risposta?.usage?.completion_tokens || token;
+  return { tokenAlSecondo: prodotti / Math.max(secondi, 0.001), secondi };
+}
+
+/** Ferma la generazione in corso, se il motore lo permette. */
+export function interrompiGenerazione() {
+  try {
+    engine?.interruptGenerate?.();
+  } catch {
+    // Se non si può interrompere, l'annullamento avverrà fra un blocco e l'altro.
+  }
+}
+
 /** Il "target" nel formato che si aspetta lo strato condiviso src/llm.js. */
 export function webllmTarget(modelId, chunk) {
   return {

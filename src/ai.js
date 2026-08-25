@@ -41,9 +41,19 @@ Vincoli:
  * @param {object} [providedTarget] provider già risolto: lo passa il browser,
  *        che sceglie il proprio motore invece di leggerlo dall'ambiente
  */
-export async function analyzeElection(input, onProgress = () => {}, providedTarget = null) {
+export async function analyzeElection(
+  input,
+  onProgress = () => {},
+  providedTarget = null,
+  { signal = null } = {},
+) {
   const target = providedTarget ?? resolveProvider();
   await ensureReachable(target);
+
+  const controllaAnnullamento = () => {
+    if (signal?.aborted) throw new Error('Simulazione interrotta.');
+  };
+  controllaAnnullamento();
 
   const chunks = chunkCodes(UNITS.map((u) => u.code), target.chunk);
   const total = chunks.length + 1;
@@ -66,6 +76,7 @@ export async function analyzeElection(input, onProgress = () => {}, providedTarg
   const failures = [];
 
   for (const [index, codes] of chunks.entries()) {
+    controllaAnnullamento();
     onProgress({
       step: index + 2,
       total,

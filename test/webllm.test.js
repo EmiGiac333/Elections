@@ -183,6 +183,38 @@ test('un blocco che fallisce non annulla la simulazione', async () => {
   assert.equal(result.simulation.states.length, UNITS.length); // i mancanti usano la base storica
 });
 
+test("l'interruzione ferma la simulazione fra un blocco e l'altro", async () => {
+  const engine = fakeEngine();
+  const annulla = new AbortController();
+  const originale = engine.chat.completions.create;
+  let chiamate = 0;
+  engine.chat.completions.create = async (req) => {
+    chiamate += 1;
+    if (chiamate === 2) annulla.abort(); // l'utente preme "Interrompi"
+    return originale(req);
+  };
+
+  await assert.rejects(
+    () => analyzeElection(INPUT, () => {}, browserTarget(engine), { signal: annulla.signal }),
+    /interrotta/i,
+  );
+  // Il blocco in corso finisce, ma i successivi non partono: su un dispositivo
+  // lento sono minuti risparmiati.
+  assert.ok(chiamate < 5, `troppe richieste dopo l'interruzione: ${chiamate}`);
+});
+
+test("un'interruzione chiesta prima di iniziare non lancia nessuna richiesta", async () => {
+  const engine = fakeEngine();
+  const annulla = new AbortController();
+  annulla.abort();
+
+  await assert.rejects(
+    () => analyzeElection(INPUT, () => {}, browserTarget(engine), { signal: annulla.signal }),
+    /interrotta/i,
+  );
+  assert.equal(engine.richieste.length, 0);
+});
+
 test('il risultato del browser ha la stessa forma di quello del server', async () => {
   const { analysis, model, usage } = await analyzeElection(
     INPUT,
