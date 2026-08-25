@@ -46,14 +46,7 @@ const RANDOM_POOL = [
   'Bad Bunny', 'Stephen Colbert', 'Meryl Streep', 'Tim Cook', 'Simone Biles',
 ];
 
-const LOADING_STEPS = [
-  'Si aprono i comitati elettorali nei 50 stati…',
-  'I sondaggisti profilano i due ticket…',
-  'Analisi collegio per collegio delle reazioni locali…',
-  'Si stimano affluenza e coalizioni demografiche…',
-  'Si simulano decine di migliaia di notti elettorali…',
-  'Si conta il Collegio Elettorale…',
-];
+const FIRST_STEP = 'Si aprono i comitati elettorali nei 50 stati…';
 
 init();
 
@@ -75,14 +68,17 @@ async function init() {
 
 function renderModeBadge(m) {
   const badge = $('mode-badge');
+  const p = m.provider ?? {};
   badge.hidden = false;
-  if (m.aiEnabled) {
-    badge.className = 'mode-badge ai';
-    badge.textContent = `Analisi con ${m.model}`;
-  } else {
+  if (!p.id) {
     badge.className = 'mode-badge demo';
-    badge.textContent = 'Modalità dimostrativa — nessuna chiave API configurata';
+    badge.textContent = 'Nessun provider configurato';
+    badge.title = p.error ?? '';
+    return;
   }
+  badge.className = `mode-badge ${p.free ? 'ai' : 'paid'}`;
+  badge.textContent = `${p.label} · ${p.model}${p.free ? ' · gratuito' : ' · a pagamento'}`;
+  badge.title = `${p.cost} — ${p.reason ?? ''}`;
 }
 
 function renderPresets() {
@@ -119,12 +115,9 @@ function setField(name, value) {
   form.elements[name].value = value ?? '';
 }
 
-async function onSubmit(event) {
-  event.preventDefault();
-  hideError();
-
+function formPayload() {
   const data = new FormData(form);
-  const payload = {
+  return {
     ticketA: {
       president: data.get('a-president'),
       vice: data.get('a-vice'),
@@ -140,6 +133,13 @@ async function onSubmit(event) {
     iterations: Number(data.get('iterations')),
     seed: data.get('seed') === '' ? null : Number(data.get('seed')),
   };
+}
+
+async function onSubmit(event) {
+  event.preventDefault();
+  hideError();
+
+  const payload = formPayload();
 
   if (!payload.ticketA.president || !payload.ticketA.vice) {
     return showError('Completa entrambi i nomi del ticket A.');
@@ -148,6 +148,15 @@ async function onSubmit(event) {
     return showError('Completa entrambi i nomi del ticket B.');
   }
 
+  await runSimulation(payload);
+}
+
+/**
+ * Il server risponde con un flusso NDJSON: righe di avanzamento e poi il
+ * risultato. Con un modello locale l'analisi dura minuti, e mostrare a che
+ * punto è evita che sembri bloccata.
+ */
+async function runSimulation(payload) {
   setBusy(true);
   try {
     const res = await fetch('/api/simulate', {
@@ -155,49 +164,100 @@ async function onSubmit(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error ?? 'Errore imprevisto del server.');
-    lastResponse = body;
-    render(body);
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `Il server ha risposto ${res.status}.`);
+    }
+
+    let result = null;
+    for await (const line of readNdjson(res)) {
+      if (line.type === 'progress') showProgress(line);
+      else if (line.type === 'error') throw new SimulationError(line.error, line.canFallback);
+      else if (line.type === 'result') result = line;
+    }
+
+    if (!result) throw new Error('Il server ha chiuso la risposta senza inviare un risultato.');
+
+    lastResponse = result;
+    render(result);
     results.hidden = false;
     results.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
-    showError(error.message);
+    showError(error.message, error instanceof SimulationError && error.canFallback);
   } finally {
     setBusy(false);
   }
+}
+
+class SimulationError extends Error {
+  constructor(message, canFallback) {
+    super(message);
+    this.canFallback = canFallback;
+  }
+}
+
+async function* readNdjson(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index;
+    while ((index = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 1);
+      if (line) yield JSON.parse(line);
+    }
+  }
+  if (buffer.trim()) yield JSON.parse(buffer.trim());
 }
 
 let loadingTimer = null;
 
 function setBusy(busy) {
   $('submit').disabled = busy;
+  $('random').disabled = busy;
   loading.hidden = !busy;
   if (!busy) {
     clearInterval(loadingTimer);
     return;
   }
   const started = Date.now();
-  let step = 0;
-  $('loading-step').textContent = LOADING_STEPS[0];
+  $('loading-step').textContent = FIRST_STEP;
   $('loading-elapsed').textContent = '0 s';
+  $('loading-bar').style.width = '0%';
   loadingTimer = setInterval(() => {
-    const seconds = Math.round((Date.now() - started) / 1000);
-    $('loading-elapsed').textContent = `${seconds} s`;
-    if (seconds > 0 && seconds % 12 === 0) {
-      step = Math.min(step + 1, LOADING_STEPS.length - 1);
-      $('loading-step').textContent = LOADING_STEPS[step];
-    }
+    $('loading-elapsed').textContent = `${Math.round((Date.now() - started) / 1000)} s`;
   }, 1000);
 }
 
-function showError(message) {
+function showProgress({ step, total, label }) {
+  $('loading-step').textContent =
+    total > 0 ? `${label} (${step} di ${total})` : label || FIRST_STEP;
+  $('loading-bar').style.width = total > 0 ? `${Math.round((step / total) * 100)}%` : '100%';
+}
+
+function showError(message, canFallback = false) {
   errorBox.textContent = message;
   errorBox.hidden = false;
+
+  const fallback = $('fallback');
+  fallback.hidden = !canFallback;
+  if (canFallback) {
+    fallback.onclick = () => {
+      hideError();
+      runSimulation({ ...formPayload(), mode: 'demo' });
+    };
+  }
 }
 
 function hideError() {
   errorBox.hidden = true;
+  $('fallback').hidden = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -578,13 +638,21 @@ function drawTable(res) {
 
 function renderDisclaimer(res) {
   const seconds = (res.elapsedMs / 1000).toFixed(1);
+  const p = res.provider ?? {};
   const source =
     res.mode === 'ai'
-      ? `<strong>Analisi generata da ${escapeHtml(res.model)}</strong> in ${seconds} s` +
+      ? `<strong>Analisi generata da ${escapeHtml(res.model)}</strong> tramite ${escapeHtml(p.label ?? 'provider sconosciuto')}` +
+        `${p.free ? ' (gratuito)' : ''} in ${seconds} s` +
         (res.usage
-          ? ` (${res.usage.input_tokens.toLocaleString('it-IT')} token in ingresso, ${res.usage.output_tokens.toLocaleString('it-IT')} in uscita)`
+          ? ` — ${res.usage.requests ?? 0} richieste, ${(res.usage.input_tokens ?? 0).toLocaleString('it-IT')} token in ingresso e ${(res.usage.output_tokens ?? 0).toLocaleString('it-IT')} in uscita`
           : '')
-      : '<strong>Modalità dimostrativa</strong>: nessun modello è stato interrogato, i margini derivano da una formula deterministica applicata ai nomi. Imposta <code>ANTHROPIC_API_KEY</code> per l\'analisi vera';
+      : '<strong>Modalità dimostrativa</strong>: nessun modello è stato interrogato, i margini derivano da una formula deterministica applicata ai nomi e non hanno valore analitico. Attiva un modello gratuito per l\'analisi vera';
+
+  const blocchi = (res.failures ?? []).length
+    ? `<p class="provider-note">Blocchi di collegi non riusciti: ${res.failures
+        .map((f) => `${escapeHtml(f.codes.join(', '))} (${escapeHtml(f.message)})`)
+        .join('; ')}.</p>`
+    : '';
 
   const gap = res.coverage?.missing?.length
     ? `<p style="margin-top:.6rem">Il modello non ha stimato ${res.coverage.missing.length} collegi
@@ -592,7 +660,7 @@ function renderDisclaimer(res) {
     : '';
 
   $('disclaimer').innerHTML = `
-    ${gap}
+    ${gap}${blocchi}
     <p>${source}. Le probabilità vengono da ${res.simulation.iterations.toLocaleString('it-IT')}
     simulazioni Monte Carlo con errori correlati a livello nazionale e regionale, seme
     <code>${res.input.seed}</code>: con gli stessi dati in ingresso il risultato è riproducibile.</p>

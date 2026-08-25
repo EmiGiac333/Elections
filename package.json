@@ -1,7 +1,7 @@
 {
   "name": "simulatore-elezioni-usa",
   "version": "1.0.0",
-  "description": "Simulatore delle elezioni presidenziali americane con ticket personalizzati e analisi generata da Claude",
+  "description": "Simulatore delle elezioni presidenziali americane con ticket personalizzati e analisi generata da un modello linguistico (anche locale e gratuito)",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -11,9 +11,6 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0"
   },
   "license": "MIT"
 }

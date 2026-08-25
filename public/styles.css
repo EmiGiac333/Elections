@@ -1004,3 +1004,41 @@ button {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Provider e avanzamento ---------- */
+
+.mode-badge.paid {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.loading-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.loading-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin: 0.5rem 0 0.4rem;
+}
+
+.loading-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--a-500);
+  transition: width 0.4s ease;
+}
+
+.provider-note {
+  margin-top: 0.6rem;
+}
+
+.provider-note code {
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}

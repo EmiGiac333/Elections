@@ -12,8 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 import { UNITS, TOTAL_EV, MAJORITY, CORE_BATTLEGROUNDS } from './src/states.js';
 import { runSimulation, hashSeed } from './src/simulation.js';
-import { analyzeElection, hasApiKey, MODEL } from './src/ai.js';
+import { analyzeElection } from './src/ai.js';
 import { offlineAnalysis } from './src/offline.js';
+import { resolveProvider, providerCatalog } from './src/providers.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -37,8 +38,8 @@ const server = http.createServer(async (req, res) => {
         totalEv: TOTAL_EV,
         majority: MAJORITY,
         battlegrounds: CORE_BATTLEGROUNDS,
-        aiEnabled: hasApiKey(),
-        model: MODEL,
+        provider: activeProvider(),
+        catalog: providerCatalog(),
       });
     }
 
@@ -58,6 +59,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+/**
+ * Restituisce un flusso NDJSON: prima le righe di avanzamento, poi il risultato.
+ * Con un modello locale l'analisi può durare minuti e l'attesa va raccontata.
+ */
 async function handleSimulate(req, res) {
   let payload;
   try {
@@ -73,29 +78,43 @@ async function handleSimulate(req, res) {
     return sendJson(res, 400, { error: error.message });
   }
 
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no',
+  });
+  const send = (line) => res.write(`${JSON.stringify(line)}\n`);
+
   const startedAt = Date.now();
+  const wantsDemo = payload?.mode === 'demo' || process.env.AI_PROVIDER === 'demo';
+
   let analysis;
   let mode;
   let usage = null;
   let model = null;
+  let provider = null;
+  let failures = [];
 
-  if (hasApiKey()) {
+  if (wantsDemo) {
+    analysis = offlineAnalysis(input);
+    mode = 'demo';
+  } else {
     try {
-      const result = await analyzeElection(input);
+      const result = await analyzeElection(input, (phase) => send({ type: 'progress', ...phase }));
       analysis = result.analysis;
       usage = result.usage;
       model = result.model;
+      provider = result.provider;
+      failures = result.failures;
       mode = 'ai';
     } catch (error) {
       console.error('Analisi con il modello fallita:', error);
-      return sendJson(res, 502, {
-        error: `Il modello non è riuscito a produrre l'analisi: ${error.message}`,
-      });
+      send({ type: 'error', error: error.message, canFallback: true });
+      return res.end();
     }
-  } else {
-    analysis = offlineAnalysis(input);
-    mode = 'demo';
   }
+
+  send({ type: 'progress', step: 0, total: 0, label: 'Simulazione delle elezioni' });
 
   const estimates = normalizeEstimates(analysis.stati);
   const nationalMargin = nationalMarginFrom(analysis.nazionale);
@@ -117,10 +136,13 @@ async function handleSimulate(req, res) {
     console.warn(`Collegi non stimati dal modello (uso la base storica): ${missing.join(', ')}`);
   }
 
-  sendJson(res, 200, {
+  send({
+    type: 'result',
     mode,
     model,
+    provider: provider ?? activeProvider(),
     usage,
+    failures,
     coverage: { expected: UNITS.length, received: estimates.length, missing },
     elapsedMs: Date.now() - startedAt,
     input,
@@ -129,6 +151,27 @@ async function handleSimulate(req, res) {
     simulation,
     meta: { totalEv: TOTAL_EV, majority: MAJORITY },
   });
+  res.end();
+}
+
+/** Descrizione del provider attivo, senza mai esporre le chiavi. */
+function activeProvider() {
+  try {
+    const target = resolveProvider();
+    return {
+      id: target.provider.id,
+      label: target.provider.label,
+      free: target.provider.free,
+      cost: target.provider.cost,
+      model: target.model,
+      reason: target.reason,
+      needsKey: Boolean(target.provider.apiKeyEnv && !target.apiKey),
+      apiKeyEnv: target.provider.apiKeyEnv,
+      setup: target.provider.setup,
+    };
+  } catch (error) {
+    return { id: null, label: 'nessuno', free: true, error: error.message };
+  }
 }
 
 function validateInput(payload) {
@@ -266,10 +309,15 @@ function sendJson(res, status, body) {
 // test non deve occupare la porta.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   server.listen(PORT, () => {
-    const modeLabel = hasApiKey()
-      ? `analisi con ${MODEL}`
-      : "MODALITÀ DIMOSTRATIVA (nessuna ANTHROPIC_API_KEY: i risultati non sono un'analisi)";
-    console.log(`Simulatore elezioni USA in ascolto su http://localhost:${PORT} — ${modeLabel}`);
+    const active = activeProvider();
+    const modeLabel = active.id
+      ? `${active.label} · modello ${active.model} (${active.cost})`
+      : `nessun provider disponibile: ${active.error}`;
+    console.log(`Simulatore elezioni USA in ascolto su http://localhost:${PORT}`);
+    console.log(`Provider attivo: ${modeLabel} — ${active.reason ?? ''}`);
+    if (active.needsKey) {
+      console.log(`Attenzione: manca ${active.apiKeyEnv}. ${active.setup}`);
+    }
   });
 }
 

@@ -1,7 +1,7 @@
 /**
  * Modalità dimostrativa.
  *
- * Se non è configurata nessuna chiave API, il simulatore resta utilizzabile con
+ * Se nessun modello è raggiungibile, il simulatore resta utilizzabile con
  * un modello euristico deterministico: dai nomi dei candidati vengono derivati
  * dei "tratti" pseudo-casuali ma stabili (stesso nome, stessi tratti), che
  * spostano il margine di ogni stato rispetto alla base storica.
@@ -109,7 +109,7 @@ export function offlineAnalysis({ ticketA, ticketB, scenario, year }) {
     racconto: {
       campagna: `Simulazione euristica per il ${year}: la campagna viene modellata come uno scostamento dal risultato presidenziale 2024, con un peso della vecchia frattura partitica pari a ${(alignment * 100).toFixed(0)}%.`,
       dibattiti:
-        'Non disponibile in modalità dimostrativa. Configura ANTHROPIC_API_KEY per ottenere l\'analisi generata dal modello.',
+        "Non disponibile in modalità dimostrativa. Attiva un modello — anche gratuito, locale o su piano free — per ottenere l'analisi vera.",
       media: 'Non disponibile in modalità dimostrativa.',
       sorpresa_ottobre: 'Non disponibile in modalità dimostrativa.',
       affluenza_e_demografia: `Lo spostamento nazionale applicato è di ${nationalShift >= 0 ? '+' : ''}${nationalShift.toFixed(1)} punti, quello urbano/rurale di ${urbanShift >= 0 ? '+' : ''}${urbanShift.toFixed(1)} punti.`,
@@ -117,7 +117,7 @@ export function offlineAnalysis({ ticketA, ticketB, scenario, year }) {
     },
     titoli_di_giornale: [
       'Modalità dimostrativa attiva: nessun titolo generato',
-      'Imposta ANTHROPIC_API_KEY per l\'analisi completa',
+      'Attiva un modello gratuito (Ollama in locale, oppure Groq/Gemini/OpenRouter) per l\'analisi completa',
       scenario?.trim()
         ? `Contesto inserito ma non utilizzato in questa modalità: "${scenario.trim().slice(0, 80)}"`
         : 'I numeri qui sotto servono solo a provare l\'interfaccia',
@@ -126,7 +126,7 @@ export function offlineAnalysis({ ticketA, ticketB, scenario, year }) {
       {
         titolo: 'Nessun modello interrogato',
         descrizione:
-          'Questa esecuzione non ha usato Claude: i margini sono generati da un hash dei nomi dei candidati e non hanno alcun valore analitico.',
+          'Questa esecuzione non ha interrogato nessun modello: i margini vengono da un hash dei nomi dei candidati e non hanno alcun valore analitico.',
         impatto: 0,
       },
       {
@@ -148,8 +148,8 @@ function demoTicket(id, ticket, profile) {
       (profile.ideologia > 0.15 ? 'Area democratica' : profile.ideologia < -0.15 ? 'Area repubblicana' : 'Candidatura indipendente'),
     slogan: 'Slogan disponibile solo con il modello attivo',
     coalizione: `Profilo euristico — carisma ${(profile.carisma * 100).toFixed(0)}/100, competenza percepita ${(profile.competenza * 100).toFixed(0)}/100, polarizzazione ${(profile.polarizzazione * 100).toFixed(0)}/100.`,
-    punti_di_forza: ['Analisi non disponibile in modalità dimostrativa', 'Configura una chiave API'],
-    punti_deboli: ['Analisi non disponibile in modalità dimostrativa', 'Configura una chiave API'],
+    punti_di_forza: ['Analisi non disponibile in modalità dimostrativa', 'Attiva un modello per l\'analisi vera'],
+    punti_deboli: ['Analisi non disponibile in modalità dimostrativa', 'Attiva un modello per l\'analisi vera'],
     stati_natali: [],
   };
 }

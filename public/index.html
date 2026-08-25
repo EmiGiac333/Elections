@@ -102,16 +102,22 @@
           <button type="submit" class="primary" id="submit">Simula l'elezione</button>
           <button type="button" class="ghost" id="random">Ticket a caso</button>
           <p class="error" id="error" role="alert" hidden></p>
+          <button type="button" class="ghost" id="fallback" hidden>
+            Procedi in modalità dimostrativa
+          </button>
         </div>
       </form>
 
       <section id="loading" class="panel loading" hidden aria-live="polite">
         <div class="spinner" aria-hidden="true"></div>
-        <div>
+        <div class="loading-body">
           <p class="loading-step" id="loading-step">Preparazione della campagna…</p>
+          <div class="loading-track" aria-hidden="true">
+            <div class="loading-bar" id="loading-bar"></div>
+          </div>
           <p class="loading-meta">
-            <span id="loading-elapsed">0 s</span> — l'analisi dei 56 collegi richiede in genere
-            da uno a tre minuti.
+            <span id="loading-elapsed">0 s</span> — i 56 collegi vengono analizzati a blocchi;
+            con un modello locale l'attesa può arrivare a qualche minuto.
           </p>
         </div>
       </section>

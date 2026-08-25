@@ -5,7 +5,7 @@ import { UNITS, TOTAL_EV, MAJORITY, POPULAR_WEIGHT } from '../src/states.js';
 import { runSimulation, hashSeed } from '../src/simulation.js';
 import { offlineAnalysis } from '../src/offline.js';
 import { validateInput, normalizeEstimates } from '../server.js';
-import { ANALYSIS_SCHEMA, UNIT_CODES } from '../src/schema.js';
+import { PROFILE_SCHEMA, buildStatesSchema, UNIT_CODES } from '../src/schema.js';
 
 test('il collegio elettorale somma a 538 e la maggioranza è 270', () => {
   assert.equal(TOTAL_EV, 538);
@@ -153,17 +153,22 @@ test("l'etichetta di partito orienta il modello dimostrativo", () => {
   assert.ok(ca.margine_a > wy.margine_a, 'la California deve restare più favorevole del Wyoming');
 });
 
-test('lo schema richiesto al modello ammette esattamente le 56 sigle', () => {
+test('lo schema di un blocco ammette solo le sigle di quel blocco', () => {
   assert.equal(UNIT_CODES.length, 56);
-  const stati = ANALYSIS_SCHEMA.properties.stati;
-  assert.deepEqual(stati.items.properties.code.enum, UNIT_CODES);
-  assert.equal(stati.items.additionalProperties, false);
-  assert.deepEqual(stati.items.required, ['code', 'margine_a', 'incertezza', 'reazione']);
+  const codes = ['PA', 'MI', 'WI'];
+  const schema = buildStatesSchema(codes);
+  assert.deepEqual(schema.properties.stati.items.properties.code.enum, codes);
+  assert.deepEqual(schema.properties.stati.items.required, [
+    'code',
+    'margine_a',
+    'incertezza',
+    'reazione',
+  ]);
 });
 
-test('ogni oggetto dello schema dichiara required e additionalProperties', () => {
-  // Gli structured outputs accettano solo oggetti chiusi: se un ramo se ne
-  // dimentica, la richiesta fallirebbe solo a runtime, con la chiave API attiva.
+test('ogni oggetto degli schemi dichiara required e additionalProperties', () => {
+  // Gli structured output accettano solo oggetti chiusi: se un ramo se ne
+  // dimentica, la richiesta fallirebbe solo a runtime, con il modello attivo.
   const visita = (node, percorso) => {
     if (!node || typeof node !== 'object') return;
     if (node.type === 'object') {
@@ -179,5 +184,6 @@ test('ogni oggetto dello schema dichiara required e additionalProperties', () =>
     }
     if (node.type === 'array') visita(node.items, `${percorso}[]`);
   };
-  visita(ANALYSIS_SCHEMA, 'radice');
+  visita(PROFILE_SCHEMA, 'profilo');
+  visita(buildStatesSchema(['PA', 'MI']), 'collegi');
 });
