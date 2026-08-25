@@ -329,12 +329,22 @@ async function runInBrowser(payload) {
       throw new SimulationError(error.message, false);
     }
 
-    await prepareEngine(modelId, ({ progress, text }) => {
+    // Prima del primo segnale del motore la pagina deve dire cosa sta aspettando:
+    // "si aprono i comitati elettorali" davanti a una barra ferma sembra un blocco.
+    $('loading-step').textContent = 'Avvio del motore del modello…';
+    setElapsed('Preparazione della scheda grafica e ricerca del modello in cache.');
+
+    const { suThreadPrincipale } = await prepareEngine(modelId, ({ progress, text }) => {
       showDownload({ progress, text });
       $('webllm-bar').style.width = `${Math.round((progress ?? 0) * 100)}%`;
       $('webllm-status').textContent = text ?? '';
     });
     $('webllm-bar').style.width = '100%';
+
+    if (suThreadPrincipale) {
+      $('webllm-status').textContent =
+        'Il motore in secondo piano non è disponibile su questo browser: il calcolo gira in primo piano e la pagina resterà ferma finché non finisce.';
+    }
 
     const target = webllmTarget(modelId);
     const { analysis, model, usage, failures } = await analyzeElection(
