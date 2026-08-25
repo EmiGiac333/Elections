@@ -132,8 +132,10 @@ async function creaMotore(webllm, modelId, onProgress, { conWorker }) {
     onProgress({ progress: report.progress ?? 0, text: report.text ?? '' });
   };
 
+  const chatOpts = PROVIDERS.webllm.chatOptions;
+
   if (!conWorker) {
-    return webllm.CreateMLCEngine(modelId, { initProgressCallback });
+    return webllm.CreateMLCEngine(modelId, { initProgressCallback }, chatOpts);
   }
 
   const worker = new Worker(new URL('./webllm-worker.js', import.meta.url), { type: 'module' });
@@ -153,7 +155,7 @@ async function creaMotore(webllm, modelId, onProgress, { conWorker }) {
 
   try {
     return await Promise.race([
-      webllm.CreateWebWorkerMLCEngine(worker, modelId, { initProgressCallback }),
+      webllm.CreateWebWorkerMLCEngine(worker, modelId, { initProgressCallback }, chatOpts),
       avvioFallito,
       sorveglia(
         () => ultimoSegnale,

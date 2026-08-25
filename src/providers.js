@@ -29,6 +29,18 @@ export const PROVIDERS = {
     browserOnly: true,
     // Un modello da 1-3 miliardi di parametri regge poche stime per volta.
     chunk: 6,
+    /**
+     * Configurazione della finestra di contesto, imposta esplicitamente.
+     *
+     * Alcuni modelli (per esempio la famiglia gemma3) dichiarano sia una
+     * finestra di contesto sia una finestra scorrevole, e la libreria rifiuta
+     * di partire se sono entrambe positive: vuole che se ne scelga una.
+     * Scegliamo il contesto pieno e disattiviamo la finestra scorrevole, perché
+     * i 512 token di quest'ultima non basterebbero nemmeno per il prompt di un
+     * blocco. 4096 token sono abbondanti per quel che chiediamo e tengono
+     * piccola la memoria occupata, che su un telefono è la risorsa scarsa.
+     */
+    chatOptions: { context_window_size: 4096, sliding_window_size: -1 },
     setup: 'Serve un browser con WebGPU: Chrome o Edge su computer, Safari 18+',
   },
   ollama: {

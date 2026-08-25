@@ -124,6 +124,18 @@ test('il provider del browser non richiede nessuna chiave e resta gratuito', () 
   assert.equal(PROVIDERS.webllm.browserOnly, true);
 });
 
+test('esattamente una fra finestra di contesto e finestra scorrevole è positiva', () => {
+  // La libreria rifiuta di avviare il modello se lo sono entrambe, e alcuni
+  // modelli le dichiarano entrambe: la scelta va fatta qui, non lasciata al
+  // caso. Il controllo vale come promemoria se un domani si toccano i valori.
+  const { context_window_size: contesto, sliding_window_size: scorrevole } =
+    PROVIDERS.webllm.chatOptions;
+
+  assert.equal([contesto, scorrevole].filter((v) => v > 0).length, 1);
+  // Il contesto deve bastare al prompt di un blocco più la sua risposta.
+  assert.ok(contesto >= 2048, `finestra di contesto troppo stretta: ${contesto}`);
+});
+
 test("l'analisi completa gira sul motore del browser senza toccare la rete", async () => {
   const engine = fakeEngine();
   const fasi = [];
