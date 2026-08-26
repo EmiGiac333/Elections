@@ -86,6 +86,28 @@ dimostrativa**: i margini vengono da una formula deterministica applicata ai nom
 provare l'interfaccia e ogni schermata lo dichiara. Non è un'analisi. Gira interamente nel
 browser, quindi funziona anche senza nessun server dietro.
 
+## App Android (il modello sul telefono)
+
+Il modello nel browser, su un telefono, è troppo lento per essere pratico: la
+GPU non ce la fa e WebGPU ci aggiunge il suo. L'app risolve proprio quello —
+stessa interfaccia dentro un WebView, ma inferenza nativa, che sullo stesso
+telefono va parecchie volte più veloce.
+
+Istruzioni e limiti in [`android/README.md`](android/README.md). In breve:
+
+```bash
+npm run build:android      # assembla il sito e lo copia dentro l'app
+# poi apri android/ con Android Studio e premi Esegui
+```
+
+Il modello lo scegli tu dalla memoria del telefono, una volta sola: l'app non lo
+scarica da sola perché quei file richiedono di accettare una licenza.
+
+**Il codice Kotlin non è mai stato compilato**: è stato scritto senza SDK
+Android e senza dispositivo. Il ponte lato JavaScript invece è collaudato con un
+finto motore nativo in un browser vero. Aspettati di dover sistemare qualcosa
+alla prima compilazione; `android/README.md` elenca i punti più probabili.
+
 ## Pubblicare online (Render, gratuito)
 
 Il progetto è pronto per il piano gratuito di [Render](https://render.com): c'è già
@@ -148,7 +170,7 @@ Render per quella che usa un modello configurato da te.
 
 | Variabile | Default | Significato |
 |---|---|---|
-| `AI_PROVIDER` | rilevato | `ollama`, `groq`, `gemini`, `openrouter`, `anthropic` oppure `demo` |
+| `AI_PROVIDER` | rilevato | `ollama`, `groq`, `gemini`, `openrouter`, `anthropic` oppure `demo` (il motore nativo e quello del browser si scelgono in pagina) |
 | `AI_MODEL` | dipende dal provider | Modello da usare |
 | `AI_STATE_CHUNK` | dipende dal provider | Quanti collegi chiedere per richiesta |
 | `AI_TIMEOUT_MS` | `180000` | Attesa massima per una risposta del modello |
@@ -210,8 +232,9 @@ server.js                 server HTTP (solo moduli Node) + endpoint /api/simulat
 render.yaml               configurazione per il deploy gratuito su Render
 .github/workflows/        pubblicazione automatica su GitHub Pages a ogni push
 scripts/build-site.mjs    assembla il sito statico in site/
+android/                  app Android: WebView + motore nativo (vedi android/README.md)
 src/providers.js          i provider disponibili e la scelta di quello attivo
-src/llm.js                dialetti WebLLM, Ollama, OpenAI-compatibile e Anthropic
+src/llm.js                dialetti nativo, WebLLM, Ollama, OpenAI-compatibile e Anthropic
 src/schema.js             schemi JSON del profilo e dei blocchi di collegi
 src/ai.js                 prompt e orchestrazione delle due fasi
 src/simulation.js         motore Monte Carlo del Collegio Elettorale
@@ -220,6 +243,7 @@ src/input.js              validazione dei dati del modulo, condivisa fra server 
 src/states.js             i 56 collegi: grandi elettori, base 2024, regione, elasticità, mappa
 src/offline.js            modello euristico della modalità dimostrativa
 src/model-picker.js       quali modelli proporre nel browser e quale preselezionare
+public/native.js          ponte verso il motore nativo dell'app Android
 public/webllm.js          caricamento del modello nel browser e scelta fra quelli disponibili
 public/webllm-worker.js   il modello gira qui, non sul thread della pagina
 public/                   interfaccia (HTML/CSS/JS, nessun framework)

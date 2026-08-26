@@ -9,7 +9,8 @@
     "dev": "node --watch server.js",
     "test": "node --test 'test/*.test.js'",
     "build:site": "node scripts/build-site.mjs",
-    "vendor:webllm": "node scripts/vendor-webllm.mjs"
+    "vendor:webllm": "node scripts/vendor-webllm.mjs",
+    "build:android": "node scripts/build-android-assets.mjs"
   },
   "engines": {
     "node": ">=20"

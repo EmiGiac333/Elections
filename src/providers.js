@@ -16,6 +16,20 @@
  */
 
 export const PROVIDERS = {
+  native: {
+    id: 'native',
+    label: 'Motore nativo del telefono',
+    kind: 'native',
+    free: true,
+    cost: 'gratuito: il modello gira sul telefono',
+    apiKeyEnv: null,
+    defaultModel: '',
+    browserOnly: true,
+    // Un motore nativo va più veloce di WebGPU, ma resta un telefono: si
+    // chiedono comunque pochi collegi per volta.
+    chunk: 6,
+    setup: "Disponibile solo dentro l'app Android, che carica il modello dal telefono",
+  },
   webllm: {
     id: 'webllm',
     label: 'Modello nel browser',

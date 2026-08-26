@@ -33,6 +33,8 @@ export async function chatJson({ system, user, schema, schemaName, target }) {
   const active = target ?? resolveProvider();
 
   switch (active.provider.kind) {
+    case 'native':
+      return callNative(active, { system, user, schema });
     case 'webllm':
       return callWebllm(active, { system, user, schema });
     case 'ollama':
@@ -44,6 +46,59 @@ export async function chatJson({ system, user, schema, schemaName, target }) {
     default:
       throw new Error(`Dialetto sconosciuto: ${active.provider.kind}`);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Motore nativo dell'app Android                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Il motore nativo non vincola l'uscita alla grammatica dello schema: la forma
+ * va chiesta nel prompt e poi verificata. È il motivo per cui il parser
+ * tollerante e la tolleranza ai blocchi falliti, già presenti, qui contano il
+ * doppio: senza grammatica un modello piccolo sbaglia la forma più spesso.
+ */
+async function callNative(active, { system, user, schema }) {
+  const testo = await active.generate({
+    system,
+    user: `${user}\n\n${istruzioniFormato(schema)}`,
+    maxToken: 1200,
+  });
+
+  return {
+    data: parseJsonLoose(testo),
+    model: active.model,
+    // Il motore nativo non riporta i token consumati.
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+}
+
+/**
+ * Descrive lo schema a parole per il modello, in forma compatta: uno schema
+ * JSON completo occuperebbe metà del contesto disponibile su un telefono.
+ */
+function istruzioniFormato(schema) {
+  return (
+    'Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo e senza recinti markdown, ' +
+    `con esattamente questa forma:\n${scheletro(schema)}`
+  );
+}
+
+/** Riduce lo schema al suo scheletro: nomi dei campi e tipi, niente altro. */
+function scheletro(schema, profondita = 0) {
+  if (profondita > 4 || !schema || typeof schema !== 'object') return '"..."';
+
+  if (schema.type === 'object') {
+    const campi = Object.entries(schema.properties ?? {}).map(
+      ([nome, valore]) => `"${nome}": ${scheletro(valore, profondita + 1)}`,
+    );
+    return `{${campi.join(', ')}}`;
+  }
+  if (schema.type === 'array') return `[${scheletro(schema.items, profondita + 1)}]`;
+  if (schema.enum) return schema.enum.slice(0, 8).map((v) => `"${v}"`).join('|');
+  if (schema.type === 'number' || schema.type === 'integer') return '0';
+  if (schema.type === 'boolean') return 'true';
+  return '"testo"';
 }
 
 /* ------------------------------------------------------------------ */

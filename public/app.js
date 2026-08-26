@@ -8,6 +8,7 @@ import { validateInput } from './src/input.js';
 import { analyzeElection } from './src/ai.js';
 import { offlineAnalysis } from './src/offline.js';
 import { buildSimulationResult } from './src/result.js';
+import * as nativo from './native.js';
 import {
   TOKEN_ANALISI_COMPLETA,
   availableModels,
@@ -95,10 +96,22 @@ async function init() {
 
   form.addEventListener('submit', onSubmit);
   $('random').addEventListener('click', fillRandom);
+  // L'app avvisa quando l'utente ha scelto un modello: l'elenco dei motori va
+  // ridisegnato, altrimenti l'opzione resta disattivata pur essendo pronta.
+  nativo.suEvento((evento) => {
+    if (evento.tipo === 'modello-pronto') setupEngines();
+    if (evento.tipo === 'modello-errore') showError(`Modello non caricato: ${evento.messaggio}`);
+    if (evento.tipo === 'modello-caricamento') {
+      showError('');
+      hideError();
+    }
+  });
+
   $('stop').addEventListener('click', () => {
     // Due strade: fermare la generazione in corso se il motore lo permette, e
     // comunque non far partire il blocco successivo.
     interrompiGenerazione();
+    nativo.interrompi();
     annullamento?.abort();
     $('loading-step').textContent = 'Interruzione in corso…';
   });
@@ -116,6 +129,14 @@ async function init() {
 function renderModeBadge() {
   const badge = $('mode-badge');
   badge.hidden = false;
+
+  if (engineMode === 'nativo') {
+    const info = nativo.stato();
+    badge.className = 'mode-badge ai';
+    badge.textContent = `Modello sul telefono${info.modello ? ` · ${info.modello}` : ''}`;
+    badge.title = 'Gira sul tuo telefono: nessuna rete, nessuna chiave, nessun costo.';
+    return;
+  }
 
   if (engineMode === 'browser') {
     const modello = $('webllm-model')?.value ?? '';
@@ -205,6 +226,7 @@ async function onSubmit(event) {
     return showError('Completa entrambi i nomi del ticket B.');
   }
 
+  if (engineMode === 'nativo') return runNativo(payload);
   if (engineMode === 'browser') return runInBrowser(payload);
   if (engineMode === 'demo') {
     // La modalità dimostrativa non ha bisogno di nessun server: gira qui.
@@ -225,7 +247,23 @@ async function setupEngines() {
   webgpu = await webgpuSupport();
 
   const serverPronto = Boolean(meta?.provider?.ready);
+  const statoNativo = nativo.stato();
+
   const opzioni = [
+    {
+      id: 'nativo',
+      titolo: 'Modello sul telefono',
+      nota: !nativo.disponibile()
+        ? "Disponibile solo dentro l'app Android."
+        : statoNativo.pronto
+          ? `Pronto: ${statoNativo.modello}. Gira sul telefono, senza rete e senza chiavi.`
+          : 'Scegli il file del modello dalla memoria del telefono per iniziare.',
+      disabilitata: !nativo.disponibile() || !statoNativo.pronto,
+      nascosta: !nativo.disponibile(),
+      azione: nativo.disponibile() && !statoNativo.pronto
+        ? { etichetta: 'Scegli il modello', esegui: () => nativo.scegliModello() }
+        : null,
+    },
     {
       id: 'browser',
       titolo: 'Modello nel tuo browser',
@@ -260,11 +298,19 @@ async function setupEngines() {
   // dimostrativa solo se non resta altro. Su un telefono il modello del browser
   // resta disponibile ma non preselezionato: sceglierlo deve essere una
   // decisione consapevole, viste le attese.
-  const ordine = compactDevice ? ['server', 'browser', 'demo'] : ['browser', 'server', 'demo'];
+  // Il motore nativo, quando c'è, batte tutto: è la ragione per cui esiste
+  // l'app. Poi il browser, il server, e la dimostrativa per ultima.
+  const ordine = compactDevice
+    ? ['nativo', 'server', 'browser', 'demo']
+    : ['nativo', 'browser', 'server', 'demo'];
   engineMode =
-    ordine.find((id) => !opzioni.find((o) => o.id === id).disabilitata) ?? 'demo';
+    ordine.find((id) => {
+      const opzione = opzioni.find((o) => o.id === id);
+      return opzione && !opzione.disabilitata;
+    }) ?? 'demo';
 
   $('engine-choices').innerHTML = opzioni
+    .filter((o) => !o.nascosta)
     .map(
       (o) => `
       <label class="engine-choice${o.disabilitata ? ' disabled' : ''}">
@@ -273,10 +319,18 @@ async function setupEngines() {
         <span>
           <b>${escapeHtml(o.titolo)}</b>
           <small>${escapeHtml(o.nota)}</small>
+          ${o.azione ? `<button type="button" class="chip" data-azione="${o.id}">${escapeHtml(o.azione.etichetta)}</button>` : ''}
         </span>
       </label>`,
     )
     .join('');
+
+  for (const bottone of document.querySelectorAll('[data-azione]')) {
+    bottone.addEventListener('click', (event) => {
+      event.preventDefault();
+      opzioni.find((o) => o.id === bottone.dataset.azione)?.azione?.esegui();
+    });
+  }
 
   for (const radio of document.querySelectorAll('input[name="engine"]')) {
     radio.addEventListener('change', () => {
@@ -406,6 +460,63 @@ async function runInBrowser(payload) {
   } catch (error) {
     if (/interrotta/i.test(error.message)) {
       // Interruzione chiesta dall'utente: non è un guasto, non va allarmata.
+      showError('Simulazione interrotta. Il modello resta caricato: puoi ripartire quando vuoi.');
+    } else {
+      showError(error.message, !(error instanceof SimulationError) || error.canFallback);
+    }
+  } finally {
+    setBusy(false);
+  }
+}
+
+/**
+ * Percorso 0: il motore nativo dell'app Android. Nessun caricamento da fare —
+ * il modello è già in memoria — quindi si va dritti all'analisi.
+ */
+async function runNativo(payload) {
+  setBusy(true);
+  const startedAt = Date.now();
+
+  try {
+    let input;
+    try {
+      input = validateInput(payload);
+    } catch (error) {
+      throw new SimulationError(error.message, false);
+    }
+
+    annullamento = new AbortController();
+    $('stop').hidden = false;
+
+    const target = nativo.nativeTarget();
+    const { analysis, model, usage, failures } = await analyzeElection(
+      input,
+      (fase) => showProgress(fase),
+      target,
+      { signal: annullamento.signal },
+    );
+
+    showProgress({ step: 0, total: 0, label: 'Simulazione delle elezioni' });
+    finish(
+      buildSimulationResult({
+        input,
+        analysis,
+        mode: 'ai',
+        model,
+        provider: {
+          id: 'native',
+          label: 'Motore nativo del telefono',
+          free: true,
+          cost: 'gratuito: il modello gira sul telefono',
+          reason: 'nessuna rete interrogata',
+        },
+        usage,
+        failures,
+        elapsedMs: Date.now() - startedAt,
+      }),
+    );
+  } catch (error) {
+    if (/interrotta/i.test(error.message)) {
       showError('Simulazione interrotta. Il modello resta caricato: puoi ripartire quando vuoi.');
     } else {
       showError(error.message, !(error instanceof SimulationError) || error.canFallback);

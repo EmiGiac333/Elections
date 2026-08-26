@@ -8,6 +8,7 @@ import { buildSimulationResult } from '../src/result.js';
 import { validateInput } from '../src/input.js';
 import { UNITS } from '../src/states.js';
 import { filterModels, suggestModel } from '../src/model-picker.js';
+import { buildStatesSchema } from '../src/schema.js';
 
 /**
  * Motore finto che parla come WebLLM. Il modello vero gira su WebGPU e i suoi
@@ -213,6 +214,46 @@ test("un'interruzione chiesta prima di iniziare non lancia nessuna richiesta", a
     /interrotta/i,
   );
   assert.equal(engine.richieste.length, 0);
+});
+
+test('il dialetto nativo chiede la forma nel prompt, non alla grammatica', async () => {
+  // Il motore nativo non vincola l'uscita: la forma va chiesta a parole e poi
+  // verificata dal parser tollerante.
+  const richieste = [];
+  const target = {
+    ...browserTarget(null),
+    provider: PROVIDERS.native,
+    generate: async (req) => {
+      richieste.push(req);
+      return 'Ecco il risultato:\n```json\n{"stati":[{"code":"PA","margine_a":2,"incertezza":4,"reazione":"x"}]}\n```';
+    },
+  };
+
+  const risposta = await chatJson({
+    target,
+    system: 'sistema',
+    user: 'analizza PA',
+    schemaName: 'stime',
+    schema: buildStatesSchema(['PA']),
+  });
+
+  assert.equal(risposta.data.stati[0].code, 'PA');
+
+  const prompt = richieste[0].user;
+  assert.match(prompt, /analizza PA/);
+  assert.match(prompt, /SOLO con un oggetto JSON valido/);
+  // Lo scheletro deve nominare i campi attesi senza riversare tutto lo schema,
+  // che su un telefono occuperebbe metà del contesto.
+  assert.match(prompt, /"margine_a": 0/);
+  assert.match(prompt, /"reazione": "testo"/);
+  assert.ok(prompt.length < 2000, `istruzioni di formato troppo lunghe: ${prompt.length}`);
+});
+
+test('il provider nativo è gratuito e vive solo dentro l\'app', () => {
+  assert.equal(PROVIDERS.native.apiKeyEnv, null);
+  assert.equal(PROVIDERS.native.free, true);
+  assert.equal(PROVIDERS.native.browserOnly, true);
+  assert.equal(PROVIDERS.native.kind, 'native');
 });
 
 test('il risultato del browser ha la stessa forma di quello del server', async () => {
